@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+@theme {
+  /* Identidade visual do Grupo EDASI (logo em src/assets/brand).
+     Azul-marinho das letras do logo = brand-800 (#121D39). */
+  --color-brand-50: #f0f3f9;
+  --color-brand-100: #dde3f0;
+  --color-brand-200: #bcc7e0;
+  --color-brand-300: #8f9fc6;
+  --color-brand-400: #6176a8;
+  --color-brand-500: #3f5489;
+  --color-brand-600: #2a3c6d;
+  --color-brand-700: #1e2c54;
+  --color-brand-800: #121d39;
+  --color-brand-900: #0e162c;
+  --color-brand-950: #080d1c;
+
+  /* Azul claro de destaque sobre o azul-marinho (ícones e realces) = accent-200. */
+  --color-accent-50: #f0f6ff;
+  --color-accent-100: #e0edff;
+  --color-accent-200: #c2dbff;
+  --color-accent-300: #94c0ff;
+  --color-accent-400: #5e9bf7;
+  --color-accent-500: #3b7bea;
+  --color-accent-600: #2a5fcf;
+  --color-accent-700: #234ca8;
+  --color-accent-800: #213f86;
+  --color-accent-900: #1f376b;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  /* Sans pesada próxima à do logotipo; só para a marca. */
+  --font-display: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+dialog::backdrop {
+  background: rgb(8 13 28 / 0.5);
+  backdrop-filter: blur(2px);
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
