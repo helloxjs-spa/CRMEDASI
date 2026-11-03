@@ -282,7 +282,7 @@ FU3 vencido -> volta para o Supervisor -> Lixeira (status = TRASHED)
 - **`lead_events` + `lead_notes`** são a trilha oficial do lead (quem, quando, de → para). Atendem "Mudanças de estágio, responsável… devem produzir eventos" sem duplicar em outra tabela.
 - **`sale_events`** é a trilha oficial da venda (criação, alterações, estorno, reativação), com o conteúdo calculado e conferido pelo PostgreSQL (migration 003). Os fatos de venda que afetam o lead também entram em `lead_events` (`SALE_*`). Vendas **não** são duplicadas em `audit_events`.
 - **`audit_events`** (central, append-only) cobre o restante: autenticação, usuários, equipes, custos de curso, parcelas, certificados e mudanças financeiras. Guarda `team_id` para permitir auditoria por equipe ao supervisor.
-- A tela de Auditoria (admin) poderá unir as duas fontes numa única linha do tempo.
+- A tela de Auditoria (admin) mostra `audit_events` com filtros na URL (usuário, ação, período no fuso do negócio) e detalhes em texto (`src/lib/audit-history.ts`). Toda ação nova em `AUDIT_ACTIONS` precisa de um texto próprio ali. Poderá unir as duas fontes numa única linha do tempo.
 - Registros de auditoria são gravados **na mesma transação** da mudança: se a mudança falhar, nada é auditado, e vice-versa.
 
 ## 6. Organização de módulos
