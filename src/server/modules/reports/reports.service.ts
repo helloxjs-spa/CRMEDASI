@@ -15,6 +15,7 @@ import { LEAD_STATUSES, SALE_STATUSES } from "@/server/db/schema";
 import { ValidationError } from "@/server/errors";
 import { listCertificates } from "@/server/modules/certificates/certificates.service";
 import { listInstallments } from "@/server/modules/installments/installments.service";
+import { recordAudit } from "@/server/modules/audit/audit.service";
 import { listLeads } from "@/server/modules/leads/leads.service";
 import { getRanking } from "@/server/modules/ranking/ranking.service";
 import { getSalesCostTotals, listSaleItemsForReport, listSales } from "@/server/modules/sales/sales.service";
@@ -70,6 +71,22 @@ export async function buildReport(ctx: ServiceContext, rawType: unknown, rawFilt
   if (filters.dateFrom && filters.dateTo && filters.dateFrom > filters.dateTo) {
     throw new ValidationError("A data inicial deve ser igual ou anterior à final.", { dateTo: ["A data inicial deve ser igual ou anterior à final."] });
   }
+  const report = await assembleReport(ctx, type, filters);
+  // Só depois de montado: exportação recusada não gera evento. Os filtros são
+  // datas e valores de lista (schemas acima), sem dados pessoais; nenhuma linha
+  // do relatório entra no evento.
+  await recordAudit(ctx.db, {
+    actorId: ctx.actor.userId,
+    action: "report.exported",
+    entityType: "report",
+    entityId: type,
+    teamId: ctx.actor.supervisedTeamId,
+    metadata: { reportType: type, filters, rowCount: report.rows.length },
+  });
+  return report;
+}
+
+async function assembleReport(ctx: ServiceContext, type: ReportType, filters: Record<string, string | undefined>): Promise<Report> {
   const withFinance = hasPermission(ctx.actor, "finance:viewCostAndProfit");
   const filename = `relatorio-${REPORT_FILE_SLUGS[type]}-${businessToday()}.csv`;
   const { dateFrom, dateTo } = filters;

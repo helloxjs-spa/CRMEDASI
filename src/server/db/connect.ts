@@ -5,7 +5,10 @@ import { Pool } from "pg";
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import * as schema from "./schema";
+import { installQueryErrorScrubber, safeErrorSummary } from "./safe-errors";
 import type { Database } from "./types";
+
+installQueryErrorScrubber();
 
 /**
  * Fonte única do schema: os SQLs executados manualmente no Supabase
@@ -44,7 +47,7 @@ export function connectDatabase(
     // normal (maxUses: 1) sempre termina com "socket closed": não é falha.
     pool.on("error", (error) => {
       if (options.perRequest && /socket has been closed/i.test(error.message)) return;
-      console.error("[db] erro em conexão ociosa:", error.message);
+      console.error("[db] erro em conexão ociosa:", safeErrorSummary(error));
     });
     const db = drizzlePg(pool, { schema, casing: "snake_case" }) as unknown as Database;
     return {

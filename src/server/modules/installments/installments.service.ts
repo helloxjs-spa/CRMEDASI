@@ -25,7 +25,7 @@ import { idSchema, parseInput } from "@/server/validation";
  *   (sales.service, com a venda já travada FOR UPDATE): criado no registro;
  *   refeito quando total, pagamento, parcelas ou data mudam — recusado se há
  *   parcela paga; estorno cancela as em aberto; reativação as reabre.
- * - Pagamento (ADMIN, SUPERVISOR, SELLER; escopo C50): uma vez, sem baixa
+ * - Pagamento (ADMIN, SUPERVISOR; escopo C50; o SELLER só consulta): uma vez, sem baixa
  *   parcial nem desfazer; trava a venda (FOR SHARE) antes da parcela, a mesma
  *   ordem das operações de venda. Auditoria `installment.paid`.
  * - Comissão, faturamento, ranking e dashboard NÃO dependem de parcelas (C45).
@@ -255,7 +255,7 @@ const listView = {
 
 /** Listagem paginada no banco; escopo e filtros no mesmo WHERE, inclusive no resumo. */
 export async function listInstallments({ db, actor }: ServiceContext, rawFilters: unknown = {}): Promise<InstallmentList> {
-  assertPermission(actor, "installments:markPaid");
+  assertPermission(actor, "installments:view");
   const filters = parseInput(listFiltersSchema, rawFilters);
   if (filters.dueFrom && filters.dueTo && filters.dueFrom > filters.dueTo) {
     throw new ValidationError("A data inicial deve ser igual ou anterior à final.", { dueTo: ["A data inicial deve ser igual ou anterior à final."] });
@@ -309,7 +309,7 @@ export async function listInstallments({ db, actor }: ServiceContext, rawFilters
 
 /** Cronograma atual de uma venda no escopo do ator (detalhe da venda). Fora do escopo → NotFound. */
 export async function getSaleInstallments({ db, actor }: ServiceContext, rawSaleId: unknown): Promise<InstallmentListEntry[]> {
-  assertPermission(actor, "installments:markPaid");
+  assertPermission(actor, "installments:view");
   const saleId = parseInput(idSchema, rawSaleId);
   const [sale] = await db
     .select({ id: sales.id })

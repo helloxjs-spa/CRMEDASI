@@ -2,6 +2,8 @@ import { and, asc, eq, ilike, or, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { hashPassword } from "@/server/auth/password";
+import { accountBucket, clearBuckets } from "@/server/auth/rate-limit";
+import { assertActorPassword } from "@/server/auth/reauth";
 import { revokeAllUserSessions } from "@/server/auth/session";
 import { assertPermission } from "@/server/authz/permissions";
 import type { ServiceContext } from "@/server/context";
@@ -17,7 +19,7 @@ import {
   lockTeamsForShare,
   unassignOpenLeadsOfSeller,
 } from "@/server/modules/leads/leads.internal";
-import { emailSchema, idSchema, nameSchema, parseInput, passwordSchema } from "@/server/validation";
+import { actorPasswordSchema, emailSchema, idSchema, nameSchema, parseInput, passwordSchema } from "@/server/validation";
 
 /**
  * Colunas que podem sair do serviço. password_hash nunca é selecionado aqui.
@@ -130,15 +132,19 @@ const createUserSchema = z
     password: passwordSchema,
     role: z.enum(USER_ROLES, { error: "Selecione um perfil." }),
     teamId: idSchema.nullish(),
+    actorPassword: actorPasswordSchema,
   })
   .refine((v) => v.role === "SELLER" || !v.teamId, {
     path: ["teamId"],
     message: "Somente vendedores pertencem a uma equipe.",
   });
 
-export async function createUser({ db, actor }: ServiceContext, input: unknown): Promise<UserView> {
+export async function createUser(ctx: ServiceContext, input: unknown): Promise<UserView> {
+  const { db, actor } = ctx;
   assertPermission(actor, "users:manage");
   const data = parseInput(createUserSchema, input);
+  // Novo ADMIN é a forma mais direta de manter acesso com uma sessão roubada.
+  if (data.role === "ADMIN") await assertActorPassword(ctx, data.actorPassword);
   const passwordHash = await hashPassword(data.password);
 
   try {
@@ -176,12 +182,17 @@ export async function createUser({ db, actor }: ServiceContext, input: unknown):
 const updateUserSchema = z.strictObject({
   name: nameSchema.optional(),
   email: emailSchema.optional(),
+  actorPassword: actorPasswordSchema,
 });
 
-export async function updateUser({ db, actor }: ServiceContext, rawId: unknown, input: unknown): Promise<UserView> {
+export async function updateUser(ctx: ServiceContext, rawId: unknown, input: unknown): Promise<UserView> {
+  const { db, actor } = ctx;
   assertPermission(actor, "users:manage");
   const id = parseInput(idSchema, rawId);
   const data = parseInput(updateUserSchema, input);
+  // O e-mail é o identificador de login: trocá-lo exige provar a identidade.
+  const target = await findUserView(db, id);
+  if (target && data.email !== undefined && data.email !== target.email) await assertActorPassword(ctx, data.actorPassword);
 
   try {
     await db.transaction(async (tx) => {
@@ -209,17 +220,18 @@ export async function updateUser({ db, actor }: ServiceContext, rawId: unknown, 
   return (await findUserView(db, id))!;
 }
 
-export async function setUserActive(
-  { db, actor }: ServiceContext,
-  rawId: unknown,
-  rawActive: unknown,
-): Promise<void> {
+export async function setUserActive(ctx: ServiceContext, rawId: unknown, rawActive: unknown, rawActorPassword?: unknown): Promise<void> {
+  const { db, actor } = ctx;
   assertPermission(actor, "users:manage");
   const id = parseInput(idSchema, rawId);
   const active = parseInput(z.boolean(), rawActive);
+  const actorPassword = parseInput(actorPasswordSchema, rawActorPassword);
   if (id === actor.userId && !active) {
     throw new ValidationError("Você não pode desativar o próprio usuário.");
   }
+  // Ligar ou desligar outro ADMIN exige provar a identidade. O papel é imutável.
+  const target = await findUserView(db, id);
+  if (target?.role === "ADMIN" && target.active !== active) await assertActorPassword(ctx, actorPassword);
 
   // READ COMMITTED (exigido pelo 003 para desativar vendedor) e nova
   // tentativa em caso de deadlock/serialização.
@@ -265,17 +277,24 @@ export async function setUserActive(
   });
 }
 
-const resetPasswordSchema = z.strictObject({ password: passwordSchema });
+const resetPasswordSchema = z.strictObject({ password: passwordSchema, actorPassword: actorPasswordSchema });
 
-export async function resetUserPassword({ db, actor }: ServiceContext, rawId: unknown, input: unknown): Promise<void> {
+export const SELF_RESET_FORBIDDEN = "Para alterar a própria senha, use a tela Perfil, que pede a senha atual.";
+
+export async function resetUserPassword(ctx: ServiceContext, rawId: unknown, input: unknown): Promise<void> {
+  const { db, actor } = ctx;
   assertPermission(actor, "users:manage");
   const id = parseInput(idSchema, rawId);
-  const { password } = parseInput(resetPasswordSchema, input);
+  if (id === actor.userId) throw new ValidationError(SELF_RESET_FORBIDDEN);
+  const { password, actorPassword } = parseInput(resetPasswordSchema, input);
+  await assertActorPassword(ctx, actorPassword);
   const passwordHash = await hashPassword(password);
 
   await db.transaction(async (tx) => {
-    const [updated] = await tx.update(users).set({ passwordHash }).where(eq(users.id, id)).returning({ teamId: users.teamId });
+    const [updated] = await tx.update(users).set({ passwordHash }).where(eq(users.id, id)).returning({ teamId: users.teamId, email: users.email });
     if (!updated) throw new NotFoundError();
+    // Libera a conta caso ela esteja com o login bloqueado por tentativas de terceiros.
+    await clearBuckets(tx, [accountBucket(updated.email).key]);
     await revokeAllUserSessions(tx, id);
     await recordAudit(tx, {
       actorId: actor.userId,

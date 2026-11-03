@@ -372,7 +372,7 @@ async function insertLegacySale(c: Client): Promise<void> {
   const teamId = await insertTeam(c, supervisor);
   const seller = await insertUser(c, "SELLER", teamId);
   const course = randomUUID();
-  await c.query(`INSERT INTO courses (id, name, institution_name, commission_cents) VALUES ($1, 'Curso', 'Inst', 10000)`, [course]);
+  await c.query(`INSERT INTO courses (id, name, institution_name) VALUES ($1, 'Curso', 'Inst')`, [course]);
   await c.query(`INSERT INTO course_costs (course_id, cost_cents) VALUES ($1, 1000)`, [course]);
   const lead = randomUUID();
   const sale = randomUUID();
@@ -556,7 +556,7 @@ describe.skipIf(!REAL_PG_URL)("004 — segurança com papel não proprietário",
       await monitor.query(`GRANT EXECUTE ON FUNCTION
         public.sale_commercial_state(public.sales), public.sale_item_snapshot(public.sale_items),
         public.sale_expected_event(uuid, public.sale_event_type), public.assert_sale_audited(uuid),
-        public.assert_sale_total(uuid), public.assert_lead_sale_state(uuid) TO ${role}`);
+        public.assert_sale_total(uuid), public.assert_lead_sale_state(uuid), public.assert_installment_schedule(uuid) TO ${role}`);
       expect(await runTx(valid(90_000), "BEGIN", app)).toEqual({ ok: true });
       expect((await events(s.saleId)).at(-1)!.metadata).toMatchObject({ itemsRepriced: [{ id: itemId, from: 100_000, to: 90_000 }] });
 

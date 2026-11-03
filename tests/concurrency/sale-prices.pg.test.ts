@@ -124,7 +124,7 @@ describe.skipIf(!REAL_PG_URL)("migration 004 em PostgreSQL real", () => {
       const teamId = await insertTeam(c, supervisor);
       const seller = await insertUser(c, "SELLER", teamId);
       const course = randomUUID();
-      await c.query(`INSERT INTO courses (id, name, institution_name, commission_cents) VALUES ($1, 'Curso', 'Inst', 10000)`, [course]);
+      await c.query(`INSERT INTO courses (id, name, institution_name) VALUES ($1, 'Curso', 'Inst')`, [course]);
       await c.query(`INSERT INTO course_costs (course_id, cost_cents) VALUES ($1, 1000)`, [course]);
       const lead = randomUUID();
       const sale = randomUUID();

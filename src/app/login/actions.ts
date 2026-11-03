@@ -3,27 +3,27 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ActionState } from "@/lib/action-state";
-import { login } from "@/server/auth/auth.service";
+import { login, LOGIN_RATE_LIMITED } from "@/server/auth/auth.service";
 import { clientIpFrom } from "@/server/auth/client-ip";
+import { loginEdgeLimitExceeded } from "@/server/auth/edge-rate-limit";
+import { safeNextPath } from "@/server/auth/safe-next-path";
 import { revokeSession, SESSION_COOKIE } from "@/server/auth/session";
 import { db } from "@/server/db/client";
+import { ValidationError } from "@/server/errors";
 import { recordAudit } from "@/server/modules/audit/audit.service";
 import { text, toErrorState } from "@/server/next/action";
 import { clearSessionCookie, getCurrentActor, setSessionCookie } from "@/server/next/session";
 
-/** Aceita apenas caminhos internos, evitando open redirect via ?next=. */
-function safeNextPath(value: string): string {
-  return value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\") ? value : "/";
-}
-
 export async function loginAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const h = await headers();
+  const ipAddress = clientIpFrom(h);
   try {
+    if (await loginEdgeLimitExceeded(ipAddress)) throw new ValidationError(LOGIN_RATE_LIMITED);
     const { token, expiresAt } = await login(
       db,
       { email: text(formData, "email"), password: text(formData, "password") },
       {
-        ipAddress: clientIpFrom(h),
+        ipAddress,
         userAgent: h.get("user-agent"),
       },
     );

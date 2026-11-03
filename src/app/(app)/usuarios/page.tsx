@@ -17,7 +17,7 @@ import { listUsers } from "@/server/modules/users/users.service";
 import { requireServiceContext } from "@/server/next/session";
 import { MoveSellerDialog } from "../equipes/team-dialogs";
 import { setUserActiveAction } from "./actions";
-import { CreateUserDialog, EditUserDialog, ResetPasswordDialog } from "./user-dialogs";
+import { CreateUserDialog, EditUserDialog, ResetPasswordDialog, SetAdminActiveDialog } from "./user-dialogs";
 
 export const metadata: Metadata = { title: "Usuários" };
 
@@ -122,11 +122,12 @@ export default async function UsersPage({ searchParams }: PageProps<"/usuarios">
                   <Td>
                     <div className="flex items-center justify-end gap-1">
                       <EditUserDialog user={user} />
-                      <ResetPasswordDialog user={user} />
+                      {user.id !== ctx.actor.userId && <ResetPasswordDialog user={user} />}
                       {user.role === "SELLER" && (
                         <MoveSellerDialog seller={{ id: user.id, name: user.name }} currentTeamId={user.teamId} teams={activeTeams} />
                       )}
-                      {user.id !== ctx.actor.userId && (
+                      {user.id !== ctx.actor.userId && user.role === "ADMIN" && <SetAdminActiveDialog user={user} />}
+                      {user.id !== ctx.actor.userId && user.role !== "ADMIN" && (
                         <ActionButton
                           action={setUserActiveAction}
                           fields={{ userId: user.id, active: String(!user.active) }}

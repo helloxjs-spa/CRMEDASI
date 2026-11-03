@@ -1,6 +1,7 @@
 import type { UserRole } from "@/server/db/schema";
 import { ROLE_LABELS } from "./format";
 import { monthTitle } from "./goals";
+import { REPORT_LABELS, type ReportType } from "./reports";
 import { formatBRL } from "./money";
 import { formatSaleDate } from "./sales";
 
@@ -62,6 +63,16 @@ export function describeAuditEvent(event: { action: string; targetName?: string 
         target: null,
         lines: [`E-mail: ${text(m.email)}`, `Motivo: ${FAILED_LOGIN_REASONS[String(m.reason)] ?? text(m.reason)}`, ...ipLine(m)],
       };
+    case "auth.login_throttled":
+      return { target: null, lines: [...(m.scope === "account" ? [`E-mail: ${text(m.email)}`] : []), ...ipLine(m)] };
+    case "report.exported":
+      return {
+        target: REPORT_LABELS[m.reportType as ReportType]?.title ?? text(m.reportType),
+        lines: [
+          `Registros: ${text(m.rowCount)}`,
+          ...Object.entries((m.filters ?? {}) as Record<string, unknown>).map(([key, value]) => `${key}: ${text(value)}`),
+        ],
+      };
     case "user.created":
       return { target, lines: [`E-mail: ${text(m.email)}`, `Perfil: ${ROLE_LABELS[m.role as UserRole] ?? text(m.role)}`] };
     case "user.updated":
@@ -100,6 +111,7 @@ export function describeAuditEvent(event: { action: string; targetName?: string 
         ],
       };
     case "auth.logout":
+    case "auth.reauth_failed":
     case "auth.password_changed":
     case "auth.admin_bootstrapped":
     case "user.activated":

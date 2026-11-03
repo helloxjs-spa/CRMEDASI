@@ -12,7 +12,7 @@ import {
   setUserActive,
   updateUser,
 } from "@/server/modules/users/users.service";
-import { createTestDatabase, seedOrganization } from "../support/db";
+import { createTestDatabase, seedOrganization, TEST_PASSWORD } from "../support/db";
 
 let handle: DatabaseHandle;
 let org: Awaited<ReturnType<typeof seedOrganization>>;
@@ -44,7 +44,7 @@ describe("vendedor não acessa recursos de outro vendedor", () => {
     const ctx = await org.ctx(org.ids.sellerA1);
     await expect(updateUser(ctx, org.ids.sellerA2, { name: "Hack" })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(setUserActive(ctx, org.ids.sellerA2, false)).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(resetUserPassword(ctx, org.ids.sellerA2, { password: "12345678" })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(resetUserPassword(ctx, org.ids.sellerA2, { password: "senha-longa-e-valida" })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(changeSellerTeam(ctx, org.ids.sellerA1, { teamId: org.ids.teamB })).rejects.toBeInstanceOf(ForbiddenError);
   });
 });
@@ -70,7 +70,7 @@ describe("supervisor não acessa outra equipe", () => {
   it("não cria usuários nem move vendedores", async () => {
     const ctx = await org.ctx(org.ids.supA);
     await expect(
-      createUser(ctx, { name: "Novo", email: "novo@teste.local", password: "12345678", role: "SELLER", teamId: org.ids.teamA }),
+      createUser(ctx, { name: "Novo", email: "novo@teste.local", password: "senha-longa-e-valida", role: "SELLER", teamId: org.ids.teamA }),
     ).rejects.toBeInstanceOf(ForbiddenError);
     await expect(changeSellerTeam(ctx, org.ids.sellerB1, { teamId: org.ids.teamA })).rejects.toBeInstanceOf(ForbiddenError);
   });
@@ -101,7 +101,7 @@ describe("administrador", () => {
 
   it("bloqueia e-mail duplicado", async () => {
     await expect(
-      createUser(await org.ctx(org.ids.admin), { name: "Outro", email: "admin@teste.local", password: "12345678", role: "ADMIN" }),
+      createUser(await org.ctx(org.ids.admin), { name: "Outro", email: "admin@teste.local", password: "senha-longa-e-valida", role: "ADMIN", actorPassword: TEST_PASSWORD }),
     ).rejects.toBeInstanceOf(ConflictError);
   });
 
@@ -110,7 +110,7 @@ describe("administrador", () => {
       createUser(await org.ctx(org.ids.admin), {
         name: "Sup",
         email: "sup.x@teste.local",
-        password: "12345678",
+        password: "senha-longa-e-valida",
         role: "SUPERVISOR",
         teamId: org.ids.teamA,
       }),
@@ -170,7 +170,7 @@ describe("proteção contra mass assignment", () => {
       createUser(await org.ctx(org.ids.admin), {
         name: "X",
         email: "x@teste.local",
-        password: "12345678",
+        password: "senha-longa-e-valida",
         role: "SELLER",
         id: "00000000-0000-0000-0000-000000000000",
       }),

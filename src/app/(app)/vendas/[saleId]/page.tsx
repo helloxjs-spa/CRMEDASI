@@ -57,7 +57,8 @@ export default async function SalePage({ params }: PageProps<"/vendas/[saleId]">
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: BUSINESS_RULES.timezone }).format(now);
   // Parcelas (§12; C52): só cartão e boleto têm cronograma.
   const installments =
-    hasInstallments(sale.paymentMethod) && hasPermission(ctx.actor, "installments:markPaid") ? await getSaleInstallments(ctx, sale.id) : null;
+    hasInstallments(sale.paymentMethod) && hasPermission(ctx.actor, "installments:view") ? await getSaleInstallments(ctx, sale.id) : null;
+  const canMarkPaid = hasPermission(ctx.actor, "installments:markPaid");
   // Comprovante de pagamento opcional (012): só os dados aqui; o arquivo vem da rota /comprovante.
   const receipt = await getSaleReceiptInfo(ctx, sale.id);
   const receiptHref = `/vendas/${sale.id}/comprovante`;
@@ -223,7 +224,7 @@ export default async function SalePage({ params }: PageProps<"/vendas/[saleId]">
                       </Td>
                       <Td className="text-slate-500">{p.paidAt ? `${formatDateTime(p.paidAt)} · ${p.paidByName ?? "—"}` : "—"}</Td>
                       <Td>
-                        {p.status === "OPEN" && (
+                        {canMarkPaid && p.status === "OPEN" && (
                           <MarkPaidButton installmentId={p.id} number={p.number} amount={formatBRL(p.amountCents)} dueDate={p.dueDate} />
                         )}
                       </Td>

@@ -30,6 +30,29 @@ export async function createSession(
   return { token, expiresAt };
 }
 
+/**
+ * Cria a sessão de um login cuja senha acabou de ser conferida, somente se ela
+ * ainda é a vigente. A linha do usuário fica travada até o COMMIT: uma redefinição
+ * concorrente termina antes (e o login é recusado) ou espera, e então apaga
+ * também esta sessão. Sem isso, a sessão aberta com a senha antiga sobreviveria.
+ */
+export async function createSessionIfCredentialsCurrent(
+  db: Database,
+  userId: string,
+  verifiedPasswordHash: string,
+  meta: { ipAddress?: string | null; userAgent?: string | null } = {},
+): Promise<{ token: string; expiresAt: Date } | null> {
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({ passwordHash: users.passwordHash, active: users.active })
+      .from(users)
+      .where(eq(users.id, userId))
+      .for("share");
+    if (!current?.active || current.passwordHash !== verifiedPasswordHash) return null;
+    return createSession(tx, userId, meta);
+  });
+}
+
 /** Retorna o Actor da sessão, ou null se o token for inválido, expirado ou o usuário estiver inativo. */
 export async function getActorBySessionToken(db: Database, token: string): Promise<Actor | null> {
   const [row] = await db

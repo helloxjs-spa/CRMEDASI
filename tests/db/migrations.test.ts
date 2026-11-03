@@ -35,6 +35,7 @@ const EXPECTED_TABLES = [
   "lead_events",
   "lead_notes",
   "leads",
+  "rate_limit_buckets",
   "sale_events",
   "sale_items",
   "sale_receipts",

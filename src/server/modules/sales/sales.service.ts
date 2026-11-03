@@ -177,6 +177,7 @@ export const COURSE_NOT_AVAILABLE = "Selecione apenas cursos ativos.";
 export { REQUEST_ID_REUSED };
 
 export const TOTAL_TOO_HIGH = "O valor total da venda passa do limite permitido.";
+export const COMMISSION_EXCEEDS_TOTAL = "A comissão dos cursos não pode ser maior que o valor total da venda. Confira os preços informados.";
 
 /** Preço de venda de UM item (o total da venda é a soma, calculada no servidor). */
 const priceCentsSchema = z
@@ -312,6 +313,7 @@ export async function createSale(ctx: ServiceContext, input: unknown): Promise<C
       const seller = await loadSaleSeller(tx, actor, sellerId);
       const snapshots = await lockCourseSnapshots(tx, data.items.map((item) => item.courseId));
       const totalCents = sumPrices(data.items);
+      assertSellerCommissionWithinTotal(actor, data.items.reduce((sum, item) => sum + snapshots.get(item.courseId)!.commissionCents, 0), totalCents);
 
       await tx.insert(sales).values({
         id: data.requestId,
@@ -364,6 +366,17 @@ export async function createSale(ctx: ServiceContext, input: unknown): Promise<C
       throw new ConflictError(REQUEST_ID_REUSED);
     }
     throw error;
+  }
+}
+
+/**
+ * SELLER não registra venda cuja comissão total passe do valor total: a comissão
+ * é indicador de desempenho e não pode ser inflada com preços irrisórios (C57).
+ * Não altera o cálculo da comissão; SUPERVISOR e ADMIN não têm esta trava.
+ */
+function assertSellerCommissionWithinTotal(actor: Actor, commissionCents: number, totalCents: number): void {
+  if (actor.role === "SELLER" && commissionCents > totalCents) {
+    throw new ValidationError(COMMISSION_EXCEEDS_TOTAL, { items: [COMMISSION_EXCEEDS_TOTAL] });
   }
 }
 
@@ -655,7 +668,7 @@ export async function updateSale(ctx: ServiceContext, rawId: unknown, input: unk
       throw new ValidationError(ITEM_REPEATED_IN_REQUEST, { items: [ITEM_REPEATED_IN_REQUEST] });
     }
     const currentItems = await tx
-      .select({ id: saleItems.id, priceCents: saleItems.priceCents })
+      .select({ id: saleItems.id, priceCents: saleItems.priceCents, commissionCents: saleItems.commissionSnapshotCents })
       .from(saleItems)
       .where(and(eq(saleItems.saleId, id), isNull(saleItems.removedAt)));
     const currentPrice = new Map(currentItems.map((item) => [item.id, item.priceCents]));
@@ -673,6 +686,10 @@ export async function updateSale(ctx: ServiceContext, rawId: unknown, input: unk
       ...toAdd,
     ]);
     if (newTotal !== sale.totalCents) changes.totalCents = newTotal;
+    if (toAdd.length > 0) {
+      const currentCommission = currentItems.filter((item) => !removed.has(item.id)).reduce((sum, item) => sum + item.commissionCents, 0);
+      assertSellerCommissionWithinTotal(actor, toAdd.reduce((sum, item) => sum + snapshots.get(item.courseId)!.commissionCents, currentCommission), newTotal);
+    }
     // Antes de gravar: novo total (itens removidos/preços corrigidos) ou nova quantidade.
     assertInstallmentsFitTotal(paymentMethod, installmentCount, newTotal);
 

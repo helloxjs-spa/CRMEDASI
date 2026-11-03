@@ -61,7 +61,10 @@ const MATRIX = {
   /** Estornar e reativar (Etapa 3b; motivo obrigatório). */
   "sales:reverse": ["ADMIN", "SUPERVISOR"],
   "sales:reactivate": ["ADMIN", "SUPERVISOR"],
-  "installments:markPaid": ["ADMIN", "SUPERVISOR", "SELLER"],
+  /** Ver parcelas: sempre combinado com o escopo (vendedor vê as das próprias vendas). */
+  "installments:view": ["ADMIN", "SUPERVISOR", "SELLER"],
+  /** Confirmar recebimento: quem vendeu não confirma sozinho (segregação de funções). */
+  "installments:markPaid": ["ADMIN", "SUPERVISOR"],
   /** Lista operacional de cursos ATIVOS, sem custo (usada em leads e vendas). */
   "courses:list": ["ADMIN", "SUPERVISOR", "SELLER"],
   "courses:manage": ["ADMIN"],

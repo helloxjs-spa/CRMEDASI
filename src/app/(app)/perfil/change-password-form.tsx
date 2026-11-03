@@ -23,8 +23,8 @@ export function ChangePasswordForm() {
       <Field label="Senha atual" htmlFor="currentPassword" errors={errors.currentPassword}>
         <Input id="currentPassword" name="currentPassword" type="password" required autoComplete="current-password" />
       </Field>
-      <Field label="Nova senha" htmlFor="newPassword" errors={errors.newPassword} hint="Mínimo de 8 caracteres.">
-        <Input id="newPassword" name="newPassword" type="password" required minLength={8} autoComplete="new-password" />
+      <Field label="Nova senha" htmlFor="newPassword" errors={errors.newPassword} hint="Mínimo de 12 caracteres, sem palavras óbvias.">
+        <Input id="newPassword" name="newPassword" type="password" required minLength={12} autoComplete="new-password" />
       </Field>
       <Field label="Confirmar nova senha" htmlFor="confirmPassword" errors={errors.confirmPassword}>
         <Input id="confirmPassword" name="confirmPassword" type="password" required autoComplete="new-password" />

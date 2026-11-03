@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DatabaseHandle } from "@/server/db/connect";
 import { MAX_INSTALLMENTS } from "@/lib/installments";
 import { auditEvents, installments, saleItems, sales } from "@/server/db/schema";
-import { ConflictError, NotFoundError, ValidationError } from "@/server/errors";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@/server/errors";
 import { getSalesIndicators } from "@/server/modules/dashboard/dashboard.service";
 import {
   getSaleInstallments,
@@ -118,27 +118,28 @@ describe("cronograma gerado com a venda (C52)", () => {
 });
 
 describe("pagamento", () => {
-  it("SELLER marca a própria parcela como paga: data do servidor, autor e auditoria; segunda vez é recusada", async () => {
+  it("SELLER não confirma pagamento; SUPERVISOR marca a parcela como paga: data do servidor, autor e auditoria; segunda vez é recusada", async () => {
     const saleId = await sale(org.ids.sellerA1);
     const [first] = await schedule(saleId);
-    await pay(org.ids.sellerA1, first.id);
+    await expect(pay(org.ids.sellerA1, first.id)).rejects.toBeInstanceOf(ForbiddenError);
+    await pay(org.ids.supA, first.id);
 
     const [row] = await handle.db.select().from(installments).where(eq(installments.id, first.id));
-    expect(row).toMatchObject({ status: "PAID", paidBy: org.ids.sellerA1 });
+    expect(row).toMatchObject({ status: "PAID", paidBy: org.ids.supA });
     expect(row.paidAt).toBeInstanceOf(Date);
     const [audit] = await handle.db.select().from(auditEvents).where(and(eq(auditEvents.action, "installment.paid"), eq(auditEvents.entityId, first.id)));
-    expect(audit).toMatchObject({ actorId: org.ids.sellerA1, entityType: "installment", teamId: org.ids.teamA });
+    expect(audit).toMatchObject({ actorId: org.ids.supA, entityType: "installment", teamId: org.ids.teamA });
     expect(audit.metadata).toMatchObject({ saleId, number: 1, amountCents: 3_334, dueDate: "2026-04-15" });
 
     await expect(pay(org.ids.supA, first.id)).rejects.toBeInstanceOf(ConflictError);
     await expect(markInstallmentPaid(await ctx(org.ids.admin), { installmentId: first.id, paidAt: "2026-01-01" })).rejects.toBeInstanceOf(ValidationError);
   });
 
-  it("escopo (C50): vendedor e supervisor de fora → NotFound; supervisor atual do vendedor transferido pode pagar", async () => {
+  it("escopo (C50): supervisor de fora → NotFound; vendedor nunca confirma; supervisor atual do vendedor transferido pode pagar", async () => {
     const mover = await insertUser(handle, { name: "Vendedor Parcelas", role: "SELLER", teamId: org.ids.teamA });
     const saleId = await sale(mover);
     const [first, second] = await schedule(saleId);
-    await expect(pay(org.ids.sellerB1, first.id)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(pay(org.ids.sellerB1, first.id)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(pay(org.ids.supB, first.id)).rejects.toBeInstanceOf(NotFoundError);
     await expect(getSaleInstallments(await ctx(org.ids.sellerB1), saleId)).rejects.toBeInstanceOf(NotFoundError);
 
@@ -155,8 +156,8 @@ describe("venda alterada depois do cronograma", () => {
     const saleId = await sale(org.ids.sellerA1, { count: 3 });
     const supervisor = await ctx(org.ids.supA);
 
-    // SELLER inclui um curso: novo total → novo cronograma.
-    await updateSale(await ctx(org.ids.sellerA1), saleId, { expectedVersion: await version(saleId), addItems: [{ courseId: course, priceCents: 5_000 }] });
+    // Inclusão de curso: novo total → novo cronograma.
+    await updateSale(supervisor, saleId, { expectedVersion: await version(saleId), addItems: [{ courseId: course, priceCents: 5_000 }] });
     expect((await schedule(saleId)).map((p) => p.amountCents)).toEqual([5_000, 5_000, 5_000]);
 
     await updateSale(supervisor, saleId, { expectedVersion: await version(saleId), installmentCount: 2 });
@@ -185,12 +186,12 @@ describe("venda alterada depois do cronograma", () => {
   it("com parcela paga: mudanças que refazem o cronograma são recusadas e nada é gravado", async () => {
     const saleId = await sale(org.ids.sellerA1, { count: 3 });
     const [first] = await schedule(saleId);
-    await pay(org.ids.sellerA1, first.id);
+    await pay(org.ids.supA, first.id);
     const before = await saleState(saleId);
     const v = before.version;
 
     for (const [userId, input] of [
-      [org.ids.sellerA1, { addItems: [{ courseId: course, priceCents: 5_000 }] }],
+      [org.ids.sellerA1, { addItems: [{ courseId: course, priceCents: 10_000 }] }],
       [org.ids.supA, { installmentCount: 6 }],
       [org.ids.supA, { paymentMethod: "PIX", installmentCount: null }],
       [org.ids.admin, { saleDate: "2026-03-20" }],
@@ -213,18 +214,19 @@ describe("quantidade de parcelas × total (cada parcela com pelo menos R$ 0,01)"
     const input = (installmentCount: number) => ({
       requestId: crypto.randomUUID(),
       leadId: lead.id,
+      sellerId: org.ids.sellerA1,
       paymentMethod: "CARD" as const,
       installmentCount,
       items: [{ courseId: course, priceCents: 100 }],
     });
     const rejected = input(101);
-    const error = await createSale(await ctx(org.ids.sellerA1), rejected).catch((e: unknown) => e);
+    const error = await createSale(await ctx(org.ids.supA), rejected).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ValidationError);
     expect(error).toMatchObject(exceeds);
     expect(await allRows(rejected.requestId)).toEqual([]);
     expect(await handle.db.select().from(sales).where(eq(sales.id, rejected.requestId))).toEqual([]);
 
-    const { saleId } = await createSale(await ctx(org.ids.sellerA1), input(100));
+    const { saleId } = await createSale(await ctx(org.ids.supA), input(100));
     const rows = await schedule(saleId);
     expect(rows).toHaveLength(100);
     expect(rows.every((p) => p.amountCents === 1)).toBe(true);
@@ -310,7 +312,7 @@ describe("estorno e reativação", () => {
   it("estorno cancela as em aberto (a paga continua paga); reativação as reabre; cancelada não pode ser paga", async () => {
     const saleId = await sale(org.ids.sellerA1, { count: 3 });
     const [first, second] = await schedule(saleId);
-    await pay(org.ids.sellerA1, first.id);
+    await pay(org.ids.supA, first.id);
     const admin = await ctx(org.ids.admin);
 
     await reverseSale(admin, saleId, { expectedVersion: await version(saleId), reason: "Desistência" });
@@ -319,7 +321,7 @@ describe("estorno e reativação", () => {
 
     await reactivateSale(admin, saleId, { expectedVersion: await version(saleId), reason: "Voltou" });
     expect((await schedule(saleId)).map((p) => p.status)).toEqual(["PAID", "OPEN", "OPEN"]);
-    await pay(org.ids.sellerA1, second.id);
+    await pay(org.ids.supA, second.id);
   });
 
   it("venda estornada sem parcela paga editada: o novo cronograma nasce cancelado e a reativação o reabre", async () => {
@@ -344,12 +346,12 @@ describe("listagem", () => {
     const old = await sale(seller, { date: "2025-01-10", count: 2, prices: [20_000], name: "Aluno Antigo" });
     const future = await sale(seller, { date: "2099-01-10", count: 2, prices: [30_000], name: "Aluno Futuro" });
     const [paid] = await schedule(old);
-    await pay(seller, paid.id);
+    await pay(org.ids.supB, paid.id);
     const me = await ctx(seller);
 
     expect(await listInstallments(me)).toMatchObject({ total: 4, amountCents: 50_000 });
     expect((await listInstallments(me, { status: "PAID" })).items.map((p) => [p.leadName, p.number, p.paidByName])).toEqual([
-      ["Aluno Antigo", 1, "Vendedor Lista Parcelas"],
+      ["Aluno Antigo", 1, "Supervisor B"],
     ]);
     expect((await listInstallments(me, { status: "OVERDUE" })).items.map((p) => [p.leadName, p.number, p.dueDate])).toEqual([
       ["Aluno Antigo", 2, "2025-03-10"],
@@ -384,7 +386,7 @@ describe("integridade no banco (006)", () => {
   it("parcela paga é imutável (sem desfazer); sem exclusão; cronograma fora da regra é recusado no COMMIT", async () => {
     const saleId = await sale(org.ids.sellerA1, { count: 2 });
     const [first, second] = await schedule(saleId);
-    await pay(org.ids.sellerA1, first.id);
+    await pay(org.ids.supA, first.id);
 
     await fails(sql`update installments set status = 'OPEN', paid_at = null, paid_by = null where id = ${first.id}`, /paga é imutável/);
     await fails(sql`delete from installments where id = ${second.id}`, /não permitida/);

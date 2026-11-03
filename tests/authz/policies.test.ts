@@ -86,11 +86,14 @@ describe("RBAC — matriz de permissões", () => {
     }
   });
 
-  it("todos os perfis veem o ranking e marcam parcelas como pagas", () => {
+  it("todos os perfis veem o ranking e as parcelas; só ADMIN e SUPERVISOR confirmam pagamento", () => {
     for (const actor of [admin, supA, sellerA1]) {
       expect(hasPermission(actor, "ranking:view")).toBe(true);
-      expect(hasPermission(actor, "installments:markPaid")).toBe(true);
+      expect(hasPermission(actor, "installments:view")).toBe(true);
     }
+    expect(hasPermission(admin, "installments:markPaid")).toBe(true);
+    expect(hasPermission(supA, "installments:markPaid")).toBe(true);
+    expect(hasPermission(sellerA1, "installments:markPaid")).toBe(false);
   });
 });
 

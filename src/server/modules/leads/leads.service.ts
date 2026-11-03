@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, ilike, isNotNull, isNull, like, lt, or, sql,
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { parseBrazilianPhone, phoneSearchDigits } from "@/lib/phone";
+import { hitBuckets, isBucketFull, type Bucket } from "@/server/auth/rate-limit";
 import { conversionRate } from "@/lib/dashboard";
 import { canTransition, LEAD_PAGE_SIZES, STAGE_LABELS, STAGE_ORDER, STAGES_WITH_DEADLINE, type LeadQueueReason } from "@/lib/leads";
 import type { Actor } from "@/server/authz/actor";
@@ -143,6 +144,25 @@ export class LeadAlreadyExistsError extends ConflictError {
   }
 }
 
+
+/** Vendedor que esbarrou em telefones já cadastrados vezes demais na janela de 15 minutos. */
+export const PHONE_LOOKUP_LIMITED = "Muitos telefones já cadastrados em pouco tempo. Aguarde alguns minutos ou procure o supervisor.";
+const PHONE_LOOKUP_LIMIT = 20;
+
+/**
+ * A resposta de telefone duplicado revela quem atende o lead (C9), então o
+ * vendedor não pode usá-la para varrer uma lista de números. SUPERVISOR e ADMIN
+ * não têm esse limite.
+ */
+const phoneLookupBucket = (actor: Actor): Bucket => ({ key: `phone-lookup:${actor.userId}`, limit: PHONE_LOOKUP_LIMIT });
+
+async function assertPhoneLookupAllowed(db: Database, actor: Actor): Promise<void> {
+  if (actor.role === "SELLER" && (await isBucketFull(db, phoneLookupBucket(actor)))) throw new ConflictError(PHONE_LOOKUP_LIMITED);
+}
+
+async function countPhoneLookup(db: Database, actor: Actor): Promise<void> {
+  if (actor.role === "SELLER") await hitBuckets(db, [phoneLookupBucket(actor)]);
+}
 
 /** Cadastro de lead por vendedor cuja equipe está inativa. */
 export const OWN_TEAM_INACTIVE = "Sua equipe está inativa. Procure o administrador.";
@@ -770,9 +790,13 @@ export async function createLead(ctx: ServiceContext, input: unknown): Promise<L
   }
   const ownerId = sellerActor ? actor.userId : data.sellerId!;
   await assertNoOverdueNegotiation(db, actor);
+  await assertPhoneLookupAllowed(db, actor);
 
   const duplicate = await findDuplicate(db, data.phone);
-  if (duplicate) throw new LeadAlreadyExistsError(duplicate);
+  if (duplicate) {
+    await countPhoneLookup(db, actor);
+    throw new LeadAlreadyExistsError(duplicate);
+  }
 
   try {
     const id = await runTransaction(db, async (tx) => {
@@ -824,7 +848,10 @@ export async function createLead(ctx: ServiceContext, input: unknown): Promise<L
   } catch (error) {
     if (isUniqueViolation(error, "leads_phone_unique")) {
       const existing = await findDuplicate(db, data.phone);
-      if (existing) throw new LeadAlreadyExistsError(existing);
+      if (existing) {
+        await countPhoneLookup(db, actor);
+        throw new LeadAlreadyExistsError(existing);
+      }
     }
     throw error;
   }
@@ -871,6 +898,7 @@ export async function editLead(ctx: ServiceContext, rawId: unknown, input: unkno
       const changes: Record<string, { from: unknown; to: unknown }> = {};
       if (data.name !== undefined && data.name !== lead.name) changes.name = { from: lead.name, to: data.name };
       if (data.phone !== undefined && data.phone !== lead.phone) {
+        await assertPhoneLookupAllowed(tx, actor);
         const duplicate = await findDuplicate(tx, data.phone);
         if (duplicate) throw new LeadAlreadyExistsError(duplicate, "edit");
         changes.phone = { from: lead.phone, to: data.phone };
@@ -908,9 +936,14 @@ export async function editLead(ctx: ServiceContext, rawId: unknown, input: unkno
       ]);
     });
   } catch (error) {
+    // Fora da transação, que já foi desfeita: a contagem precisa permanecer.
+    if (error instanceof LeadAlreadyExistsError) await countPhoneLookup(db, actor);
     if (data.phone && isUniqueViolation(error, "leads_phone_unique")) {
       const existing = await findDuplicate(db, data.phone);
-      if (existing) throw new LeadAlreadyExistsError(existing, "edit");
+      if (existing) {
+        await countPhoneLookup(db, actor);
+        throw new LeadAlreadyExistsError(existing, "edit");
+      }
     }
     throw error;
   }

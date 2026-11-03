@@ -1,6 +1,7 @@
 import "server-only";
 import type { ActionState } from "@/lib/action-state";
 import type { ServiceContext } from "@/server/context";
+import { safeErrorSummary } from "@/server/db/safe-errors";
 import { AppError, ValidationError } from "@/server/errors";
 import { requireServiceContext } from "./session";
 
@@ -34,7 +35,7 @@ export function toErrorState(error: unknown): ActionState {
       at: Date.now(),
     };
   }
-  console.error("[action] erro inesperado", error);
+  console.error("[action] erro inesperado", safeErrorSummary(error));
   return { status: "error", message: "Erro inesperado. Tente novamente.", fieldErrors: {}, at: Date.now() };
 }
 

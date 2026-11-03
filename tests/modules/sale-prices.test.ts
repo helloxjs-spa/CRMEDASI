@@ -167,7 +167,7 @@ describe("edição de itens e preços", () => {
       { courseId: course2, priceCents: 50_000 },
     ]);
     const [a, b] = [await byPrice(saleId, 100_000), await byPrice(saleId, 50_000)];
-    const other = await sell([{ courseId: course, priceCents: 1_000 }]);
+    const other = await sell([{ courseId: course, priceCents: 100_000 }]);
     const [foreign] = await itemsOf(other.saleId);
     const sup = await ctx(org.ids.supA);
     const v = await version(saleId);

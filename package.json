@@ -16,9 +16,9 @@
     "admin:create": "tsx scripts/admin-create.mts",
     "setup": "npm run db:migrate && npm run db:seed",
     "check": "npm run lint && npm run typecheck && npm test",
-    "cf:build": "opennextjs-cloudflare build",
-    "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "cf:build": "node scripts/cf-guard.mjs preflight && opennextjs-cloudflare build && node scripts/cf-guard.mjs verify",
+    "cf:preview": "npm run cf:build && opennextjs-cloudflare preview",
+    "cf:deploy": "npm run cf:build && opennextjs-cloudflare deploy",
     "postinstall": "patch-package"
   },
   "dependencies": {

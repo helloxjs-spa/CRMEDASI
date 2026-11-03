@@ -40,7 +40,7 @@ export const metadata: Metadata = { title: "Parcelas" };
  */
 export default async function InstallmentsPage({ searchParams }: PageProps<"/parcelas">) {
   const ctx = await requireServiceContext();
-  if (!hasPermission(ctx.actor, "installments:markPaid")) notFound();
+  if (!hasPermission(ctx.actor, "installments:view")) notFound();
   const params = parseInstallmentsParams(await searchParams);
   const inverted = !!(params.from && params.to && params.from > params.to);
 
@@ -109,6 +109,7 @@ export default async function InstallmentsPage({ searchParams }: PageProps<"/par
 async function InstallmentsResults({ ctx, params, showSeller }: { ctx: ServiceContext; params: InstallmentsParams; showSeller: boolean }) {
   const result = await listInstallments(ctx, toInstallmentFilters(params));
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: BUSINESS_RULES.timezone }).format(new Date());
+  const canMarkPaid = hasPermission(ctx.actor, "installments:markPaid");
 
   return (
     <>
@@ -166,7 +167,7 @@ async function InstallmentsResults({ ctx, params, showSeller }: { ctx: ServiceCo
                     </Td>
                     <Td className="text-slate-500">{p.paidAt ? `${formatDateTime(p.paidAt)} · ${p.paidByName ?? "—"}` : "—"}</Td>
                     <Td>
-                      {p.status === "OPEN" && (
+                      {canMarkPaid && p.status === "OPEN" && (
                         <MarkPaidButton installmentId={p.id} number={p.number} amount={formatBRL(p.amountCents)} dueDate={p.dueDate} />
                       )}
                     </Td>
@@ -195,7 +196,7 @@ async function InstallmentsResults({ ctx, params, showSeller }: { ctx: ServiceCo
                   {showSeller && <span>· {p.sellerName}</span>}
                   {p.paidAt && <span>· paga em {formatDateTime(p.paidAt)}</span>}
                 </div>
-                {p.status === "OPEN" && (
+                {canMarkPaid && p.status === "OPEN" && (
                   <div className="mt-3">
                     <MarkPaidButton installmentId={p.id} number={p.number} amount={formatBRL(p.amountCents)} dueDate={p.dueDate} />
                   </div>

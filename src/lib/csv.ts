@@ -2,18 +2,24 @@
  * CSV para Excel (pt-BR), sem dependências: separador ";", decimal com
  * vírgula, UTF-8 com BOM (acentos corretos ao abrir no Excel) e quebras CRLF.
  *
- * Textos que começam com =, +, -, @, tabulação ou CR recebem um apóstrofo na
- * frente: o Excel não os interpreta como fórmula (injeção de fórmula em CSV).
+ * Textos que começam com =, +, -, @ (mesmo depois de espaços, e nas formas de
+ * largura total), tabulação ou quebra de linha recebem um apóstrofo na frente: o
+ * Excel não os interpreta como fórmula (injeção de fórmula em CSV). O mesmo vale
+ * depois de vírgula, ponto e vírgula ou barra vertical: um Excel configurado com
+ * outro separador quebraria o texto ali e leria o resto como célula nova.
  * Números e valores monetários não passam por essa proteção.
  */
 
 export type CsvCell = string | number | null | undefined | { cents: number };
 
-const FORMULA_START = /^[=+\-@\t\r]/;
+const FORMULA_CHARS = "=+\\-@\\uFF1D\\uFF0B\\uFF0D\\uFF20";
+const FORMULA_START = new RegExp(`^[\\s\\uFEFF\\u200B-\\u200D]*[${FORMULA_CHARS}]|^[\\t\\r\\n]`);
+const FORMULA_AFTER_SEPARATOR = new RegExp(`([,;|]\\s*)(?=[${FORMULA_CHARS}])`, "g");
 
 function textCell(value: string): string {
-  const safe = FORMULA_START.test(value) ? `'${value}` : value;
-  return /[";\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+  const neutralized = value.replace(FORMULA_AFTER_SEPARATOR, "$1'");
+  const safe = FORMULA_START.test(neutralized) ? `'${neutralized}` : neutralized;
+  return /[";,\t\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
 /** Centavos → "1234,56" (sem separador de milhar, para o Excel ler como número). */

@@ -513,7 +513,7 @@ describe("leituras de apoio à tela", () => {
     const seller = await insertUser(handle, { name: `Vendedor Busca ${++seq}`, role: "SELLER", teamId: org.ids.teamA });
     for (let i = 0; i < 3; i++) {
       const leadId = await newLead(seller, `Maria Busca ${i}`);
-      await createSale(await ctx(seller), { ...saleInput(leadId, course), items: [{ courseId: course, priceCents: 100 }, { courseId: course2, priceCents: 200 }] });
+      await createSale(await ctx(org.ids.admin), { ...saleInput(leadId, course), sellerId: seller, items: [{ courseId: course, priceCents: 100 }, { courseId: course2, priceCents: 200 }] });
     }
     const sellerCtx = await ctx(seller);
     const found = await listSales(sellerCtx, { search: "maria busca", pageSize: 25 });

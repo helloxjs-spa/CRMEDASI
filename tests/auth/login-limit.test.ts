@@ -1,7 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { login } from "@/server/auth/auth.service";
 import { clientIpFrom, forwardedHeadersTrusted } from "@/server/auth/client-ip";
-import { clearAttempts, isRateLimited, registerFailedAttempt } from "@/server/auth/rate-limit";
 import type { DatabaseHandle } from "@/server/db/connect";
 import { createTestDatabase, seedOrganization, TEST_PASSWORD } from "../support/db";
 
@@ -44,24 +43,6 @@ describe("IP do cliente (testes unitários: o ambiente é simulado; não comprov
       expect(clientIpFrom(forged)).toBeNull();
       expect(clientIpFrom(new Headers({ "cf-connecting-ip": "203.0.113.9", "x-forwarded-for": "1.2.3.4" }))).toBe("203.0.113.9");
     }
-  });
-});
-
-describe("limite de tentativas (em memória, janela fixa de 15 min, 10 falhas)", () => {
-  it("bloqueia na 10ª falha, libera quando a janela vence e é zerado por clearAttempts", () => {
-    const key = "janela@teste.local|203.0.113.1";
-    const t0 = 1_000_000;
-    for (let i = 0; i < 9; i++) registerFailedAttempt(key, t0);
-    expect(isRateLimited(key, t0)).toBe(false);
-    registerFailedAttempt(key, t0);
-    expect(isRateLimited(key, t0)).toBe(true);
-    expect(isRateLimited(key, t0 + 15 * 60 * 1000)).toBe(false);
-    registerFailedAttempt(key, t0 + 15 * 60 * 1000); // nova janela: recomeça em 1
-    expect(isRateLimited(key, t0 + 15 * 60 * 1000)).toBe(false);
-    for (let i = 0; i < 9; i++) registerFailedAttempt(key, t0 + 15 * 60 * 1000);
-    expect(isRateLimited(key, t0 + 15 * 60 * 1000)).toBe(true);
-    clearAttempts(key);
-    expect(isRateLimited(key, t0 + 15 * 60 * 1000)).toBe(false);
   });
 });
 

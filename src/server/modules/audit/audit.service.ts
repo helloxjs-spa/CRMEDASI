@@ -11,6 +11,8 @@ import { idSchema, parseInput } from "@/server/validation";
 export const AUDIT_ACTIONS = {
   "auth.login": "Login",
   "auth.login_failed": "Falha de login",
+  "auth.login_throttled": "Login bloqueado por excesso de tentativas",
+  "auth.reauth_failed": "Confirmação de senha recusada",
   "auth.logout": "Logout",
   "auth.password_changed": "Senha alterada pelo próprio usuário",
   "auth.admin_bootstrapped": "Primeiro administrador criado (bootstrap)",
@@ -34,11 +36,12 @@ export const AUDIT_ACTIONS = {
   "sale.receipt_attached": "Comprovante de pagamento anexado à venda",
   "sale.receipt_removed": "Comprovante de pagamento removido da venda",
   "goal.set": "Meta mensal do vendedor definida",
+  "report.exported": "Relatório exportado",
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_ACTIONS;
 
-export const AUDIT_ENTITY_TYPES = ["user", "team", "session", "course", "certificate", "installment", "sale", "seller_goal"] as const;
+export const AUDIT_ENTITY_TYPES = ["user", "team", "session", "course", "certificate", "installment", "sale", "seller_goal", "report"] as const;
 
 export type AuditInput = {
   actorId: string | null;

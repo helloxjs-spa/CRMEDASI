@@ -1,4 +1,4 @@
-import { index, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { users } from "./organization";
 
 /**
@@ -22,3 +22,17 @@ export const sessions = pgTable(
 );
 
 export type Session = typeof sessions.$inferSelect;
+
+/**
+ * Contadores de tentativas compartilhados entre instâncias (migration 009). A
+ * chave é um SHA-256; não é histórico: linhas vencidas são apagadas.
+ */
+export const rateLimitBuckets = pgTable(
+  "rate_limit_buckets",
+  {
+    key: text("key").primaryKey(),
+    attempts: integer("attempts").notNull(),
+    windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("rate_limit_buckets_window_idx").on(t.windowStartedAt)],
+);

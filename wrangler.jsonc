@@ -3,6 +3,11 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "crmedasi",
   "main": ".open-next/worker.js",
+  // Roda antes de todo deploy, por qualquer caminho (wrangler deploy, opennextjs-cloudflare
+  // deploy, Workers Builds): se o artefato tiver dados de .env, o deploy é abortado.
+  "build": {
+    "command": "node scripts/cf-guard.mjs verify"
+  },
   "compatibility_date": "2026-10-01",
   // nodejs_compat: pg (sockets TCP), node:crypto (scrypt, sessões) e AsyncLocalStorage.
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
@@ -17,6 +22,15 @@
   "vars": {
     "SESSION_TTL_HOURS": "12"
   },
+  // Rate Limiting da Cloudflare por IP no login (src/server/auth/edge-rate-limit.ts). Em
+  // *.workers.dev não há zona, então regras de WAF não se aplicam; este binding sim.
+  "ratelimits": [
+    {
+      "name": "LOGIN_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 20, "period": 60 }
+    }
+  ],
   // Conexão com o PostgreSQL do Supabase via Hyperdrive (pool na borda).
   // 1) npx wrangler hyperdrive create crm-edasi-db --connection-string="<Session pooler do Supabase>" --caching-disabled
   // 2) cole o id retornado abaixo (enquanto estiver o texto COLE_AQUI..., o deploy falha de propósito).

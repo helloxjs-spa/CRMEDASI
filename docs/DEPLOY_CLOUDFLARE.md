@@ -14,8 +14,23 @@ Navegador ──► Worker "crmedasi" (Next.js via OpenNext)
 | Item | Por quê |
 |---|---|
 | Conta Cloudflare com **Workers Paid** (US$ 5/mês) | O login usa `scrypt` (N=32768), que gasta dezenas de milissegundos de CPU por tentativa; o plano gratuito limita a 10 ms de CPU por requisição. O pacote (1,8 MB gzip) caberia no gratuito, a CPU do login não. |
-| Migrations 001–006 executadas no Supabase | O deploy não altera o schema (regra do projeto). |
-| Build em **Linux** (Workers Builds, GitHub Actions ou WSL) | O OpenNext cria *symlinks* no build; no Windows sem Modo de Desenvolvedor o build falha com `EPERM`. |
+| Migrations 001–009 executadas no Supabase | O deploy não altera o schema (regra do projeto). **Execute a 009 antes de publicar o código que a usa**: sem ela, o login e outras operações falham (lista abaixo). |
+| Build em **Linux** (Workers Builds, GitHub Actions ou WSL) ou em cópia limpa | O OpenNext cria *symlinks* no build; no Windows sem Modo de Desenvolvedor o build falha com `EPERM`. |
+| **Nenhum `.env` na pasta do build** | O OpenNext embute o conteúdo dele no Worker. Veja a seção 4. |
+
+### O que depende da migration 009
+
+O código usa a tabela `rate_limit_buckets`. Sem ela, estas operações terminam em erro, porque a consulta à tabela falha (`42P01`):
+
+| Quem | Operação |
+|---|---|
+| Todos os perfis | **Login** e troca da própria senha (tela Perfil) |
+| SELLER | Cadastrar lead e alterar o telefone de um lead |
+| ADMIN | Redefinir senha, alterar e-mail, criar ADMIN e ativar ou desativar ADMIN |
+
+Continuam funcionando sem a tabela: sessões já abertas, cadastro de lead por SUPERVISOR e ADMIN, edição de lead pelo SELLER sem mudar o telefone, alteração só do nome do usuário, e criação e ativação de usuários que não são ADMIN.
+
+A 009 só cria a tabela nova, sem alterar objetos existentes, então a versão já publicada continua funcionando depois dela. A ordem é sempre: **executar a 009, conferir, e só então publicar**.
 
 ## 2. Variáveis e secrets
 
@@ -50,13 +65,21 @@ Nenhuma variável é obrigatória: o build não acessa o banco. Opcional: `NODE_
 
 ## 4. Deploy
 
+> **Nunca rode o build na pasta onde está o seu `.env`.** O `opennextjs-cloudflare build` lê `.env`, `.env.local` e variantes e grava os valores em `.open-next/cloudflare/next-env.mjs`, que vai para o bundle do Worker em texto puro, inclusive a senha do banco. O `next build` também copia o `.env` para `.next/standalone`.
+>
+> `scripts/cf-guard.mjs` bloqueia isso em dois pontos:
+> - **`preflight`** (em `npm run cf:build`): recusa a pasta se houver `.env` com variáveis privadas.
+> - **`verify`** (ao fim do `cf:build` e em todo `wrangler deploy`, pelo `build.command` do `wrangler.jsonc`): recusa o artefato se encontrar variáveis em `next-env.mjs`, arquivos `.env`, connection strings ou os valores do `.env` local. Mostra só nomes, nunca valores.
+>
+> Use sempre `npm run cf:build` e `npm run cf:deploy`. Chamar `opennextjs-cloudflare build` direto pula o `preflight`, e `--no-build` no wrangler pula o `verify`: não faça isso.
+
 ### Opção A — Workers Builds (Git, recomendado)
 
 Cloudflare › Workers & Pages › Create › Import a repository, e configure:
 
 | Campo | Valor |
 |---|---|
-| Build command | `npx opennextjs-cloudflare build` |
+| Build command | `npm run cf:build` |
 | Deploy command | `npx wrangler deploy` |
 | Root directory | `/` |
 
@@ -64,13 +87,43 @@ A cada push na branch configurada, a Cloudflare compila em Linux e publica.
 
 > **Hyperdrive no deploy.** `wrangler deploy` detecta o projeto OpenNext e chama `opennextjs-cloudflare deploy`, que monta um proxy local dos bindings antes de publicar. Sem um endereço local para o Hyperdrive, falha com `When developing locally, you should use a local Postgres connection string to emulate Hyperdrive`. Por isso o `wrangler.jsonc` tem um `localConnectionString` **fictício** (sem senha, nunca usado em produção nem conectado no deploy). Não remova.
 
-### Opção B — Linha de comando (Linux/macOS/WSL)
+### Opção B — Linha de comando, sempre em cópia limpa
+
+Uma cópia feita com `git archive` não leva o `.env` (Linux/macOS/WSL):
 
 ```bash
+mkdir ../crmedasi-build && git archive HEAD | tar -x -C ../crmedasi-build
+cd ../crmedasi-build
 npm ci                 # aplica também o patch em patches/ (postinstall)
 npx wrangler login
-npm run cf:deploy      # opennextjs-cloudflare build && deploy
+npm run cf:deploy      # guarda + build + guarda + deploy
 ```
+
+### Conferir um Worker já publicado, sem expor segredos
+
+Na pasta do projeto, rode o trecho abaixo. Ele baixa o script da versão ativa e informa só `true` ou `false`; o token e os valores nunca são impressos, e a cópia baixada fica só na memória.
+
+```bash
+node --input-type=module <<'EOF'
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+const run = (...args) => execFileSync(process.execPath, ["node_modules/wrangler/bin/wrangler.js", ...args], { encoding: "utf8" });
+const token = JSON.parse(run("auth", "token", "--json").replace(/^[^{]*/, "")).token;
+const api = (p) => fetch("https://api.cloudflare.com/client/v4" + p, { headers: { Authorization: "Bearer " + token } });
+const account = (await (await api("/accounts?per_page=1")).json()).result[0].id;
+const text = Buffer.from(await (await api("/accounts/" + account + "/workers/scripts/crmedasi")).arrayBuffer()).toString("latin1");
+const url = new URL(readFileSync(".env", "utf8").match(/^DATABASE_URL=(.*)$/m)[1].trim());
+console.log({
+  urlDoEnv: text.includes(url.href),
+  senhaDoEnv: text.includes(decodeURIComponent(url.password)),
+  hostDoEnv: text.includes(url.hostname),
+  poolerSupabase: /pooler\.supabase/.test(text),
+  variavelSeed: /SEED_PASSWORD/.test(text),
+});
+EOF
+```
+
+Tudo precisa dar `false`. Se algum der `true`, **troque a senha do banco no Supabase imediatamente**, atualize o Hyperdrive e publique um build limpo.
 
 ### Primeiro administrador
 
@@ -106,6 +159,15 @@ npm run cf:preview
 
 ## 8. Pontos de atenção em produção
 
-- **Limite de tentativas de login** (`rate-limit.ts`) é em memória: no Workers vale por instância (isolate), então é mais fraco. A chave é e-mail + IP; o IP vem de `CF-Connecting-IP`, preenchido pela Cloudflare (`src/server/auth/client-ip.ts`). Sem esse cabeçalho o IP fica desconhecido: `X-Forwarded-For` (cujo primeiro valor é enviado pelo cliente) e `X-Real-IP` só são lidos com `NODE_ENV` `development` (`next dev`) ou `test`. Em qualquer build de produção (o Worker, `cf:preview`, `next start`) eles são ignorados. Para um limite global, mover para uma tabela no Postgres (exige migration) ou usar Rate Limiting da Cloudflare (WAF) na rota `/login`.
+- **Limite de tentativas de login**, em três camadas:
+  - **Binding `LOGIN_RATE_LIMITER`** (`wrangler.jsonc`): 20 tentativas por minuto por IP (IPv6 por /64), na borda, antes do banco e do scrypt. Funciona em `*.workers.dev`; o contador é por localização e aproximado.
+  - **Tabela `rate_limit_buckets`** (migration 009, `src/server/auth/rate-limit.ts`): compartilhada entre instâncias. Por janela de 15 minutos: 10 falhas por e-mail + IP, 30 por conta e 100 por IP. O bloqueio **vence sozinho** e o reset de senha pelo ADMIN libera a conta; nada trava uma conta de forma permanente.
+  - **WAF:** regras de Rate Limiting são por zona, e `*.workers.dev` não tem zona. **Só valem depois de ligar um domínio próprio** (abaixo).
+- **IP confiável:** vem de `CF-Connecting-IP`, preenchido pela Cloudflare (`src/server/auth/client-ip.ts`). Sem esse cabeçalho o IP fica desconhecido: `X-Forwarded-For` (cujo primeiro valor é enviado pelo cliente) e `X-Real-IP` só são lidos com `NODE_ENV` `development` (`next dev`) ou `test`. Em qualquer build de produção (o Worker, `cf:preview`, `next start`) eles são ignorados.
+- **Regra de WAF, ao usar domínio próprio:** Cloudflare › seu domínio › Security › WAF › Rate limiting rules › Create rule:
+  - *Expression:* `(http.request.method eq "POST" and http.request.uri.path eq "/login")`
+  - *Characteristics:* IP
+  - *Requests / Period:* 20 por 1 minuto
+  - *Action:* Block, por 10 minutos (o plano gratuito pode limitar período e duração; use os valores disponíveis)
 - **Domínio próprio:** Workers › Settings › Domains & Routes. O cookie de sessão é por host.
 - **Observabilidade:** `observability.enabled` está ligado no `wrangler.jsonc` (Workers Logs).
