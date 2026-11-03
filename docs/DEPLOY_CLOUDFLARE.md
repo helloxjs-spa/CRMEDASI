@@ -14,7 +14,7 @@ Navegador ──► Worker "crmedasi" (Next.js via OpenNext)
 | Item | Por quê |
 |---|---|
 | Conta Cloudflare com **Workers Paid** (US$ 5/mês) | O login usa `scrypt` (N=32768), que gasta dezenas de milissegundos de CPU por tentativa; o plano gratuito limita a 10 ms de CPU por requisição. O pacote (1,8 MB gzip) caberia no gratuito, a CPU do login não. |
-| Migrations 001–009 executadas no Supabase | O deploy não altera o schema (regra do projeto). **Execute a 009 antes de publicar o código que a usa**: sem ela, o login e outras operações falham (lista abaixo). |
+| Migrations 001–009 executadas no Supabase | O deploy não altera o schema (regra do projeto). **Execute a 009 antes de publicar o código que a usa**: sem ela, o login e outras operações falham (lista abaixo). No Supabase de produção da EDASI, 001–009 já foram executadas manualmente. |
 | Build em **Linux** (Workers Builds, GitHub Actions ou WSL) ou em cópia limpa | O OpenNext cria *symlinks* no build; no Windows sem Modo de Desenvolvedor o build falha com `EPERM`. |
 | **Nenhum `.env` na pasta do build** | O OpenNext embute o conteúdo dele no Worker. Veja a seção 4. |
 
@@ -30,7 +30,7 @@ O código usa a tabela `rate_limit_buckets`. Sem ela, estas operações terminam
 
 Continuam funcionando sem a tabela: sessões já abertas, cadastro de lead por SUPERVISOR e ADMIN, edição de lead pelo SELLER sem mudar o telefone, alteração só do nome do usuário, e criação e ativação de usuários que não são ADMIN.
 
-A 009 só cria a tabela nova, sem alterar objetos existentes, então a versão já publicada continua funcionando depois dela. A ordem é sempre: **executar a 009, conferir, e só então publicar**.
+A 009 só cria a tabela nova, sem alterar objetos existentes, então a versão já publicada continua funcionando depois dela. A ordem é sempre: **executar a 009, conferir, e só então publicar**. No Supabase de produção da EDASI ela já foi executada manualmente e conferida: não a execute de novo (uma segunda execução é recusada, sem efeito).
 
 ## 2. Variáveis e secrets
 
