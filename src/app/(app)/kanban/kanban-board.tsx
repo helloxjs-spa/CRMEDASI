@@ -2,10 +2,10 @@
 
 import { ArrowRight, GripVertical, Loader2, Lock, ShoppingCart } from "lucide-react";
 import Link from "next/link";
-import { useOptimistic, useState, useTransition } from "react";
+import { useEffect, useOptimistic, useState, useTransition } from "react";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/cn";
-import { STAGE_LABELS, type DeadlineInfo } from "@/lib/leads";
+import { followUpAlert, STAGE_LABELS } from "@/lib/leads";
 import type { LeadStage, LeadStatus } from "@/server/db/schema";
 import { DeadlineBadge } from "../leads/lead-badges";
 import { LeadAdminActions, type LeadActionTarget } from "../leads/lead-actions";
@@ -23,7 +23,6 @@ export type KanbanCard = {
   status: LeadStatus;
   ownerId: string | null;
   stageDueAt: string | null;
-  deadline: DeadlineInfo["kind"];
   href: string;
   /** Destinos permitidos agora (calculados no servidor; o backend revalida). */
   targets: LeadStage[];
@@ -37,6 +36,9 @@ export type KanbanCard = {
 export type KanbanColumn = { stage: LeadStage; total: number; listHref: string; cards: KanbanCard[] };
 
 type Move = { leadId: string; from: LeadStage; to: LeadStage };
+
+/** De quanto em quanto tempo o quadro recalcula cores e prazos com a tela aberta. */
+const CLOCK_INTERVAL_MS = 60_000;
 
 function applyMove(columns: KanbanColumn[], move: Move): KanbanColumn[] {
   const card = columns.find((c) => c.stage === move.from)?.cards.find((c) => c.id === move.leadId);
@@ -61,7 +63,14 @@ export function KanbanBoard({ columns, now, canMove }: { columns: KanbanColumn[]
   const [board, applyOptimistic] = useOptimistic(columns, applyMove);
   const [dragging, setDragging] = useState<KanbanCard | null>(null);
   const [over, setOver] = useState<LeadStage | null>(null);
-  const nowDate = new Date(now);
+  const [clock, setClock] = useState(0);
+  // Os cards mudam de cor sem recarregar; `now` volta a valer quando o servidor renderiza de novo.
+  const nowDate = new Date(Math.max(Date.parse(now), clock));
+
+  useEffect(() => {
+    const timer = setInterval(() => setClock(Date.now()), CLOCK_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, []);
 
   const doMove = (card: KanbanCard, to: LeadStage) => {
     if (!card.targets.includes(to)) return;
@@ -157,8 +166,9 @@ function Card({
   onMove: (to: LeadStage) => void;
 }) {
   const draggable = canMove && card.targets.length > 0 && !card.pending;
-  const awaiting = card.deadline === "awaiting_supervisor";
   const lead = { status: card.status, ownerId: card.ownerId, stage: card.stage, stageDueAt: card.stageDueAt ? new Date(card.stageDueAt) : null };
+  // Durante a movimentação o prazo ainda é o da etapa anterior: sem cor até o servidor responder.
+  const alert = card.pending ? "none" : followUpAlert(lead, now);
 
   return (
     <li
@@ -170,9 +180,12 @@ function Card({
       }}
       onDragEnd={onDragEnd}
       className={cn(
-        "group relative rounded-lg bg-white p-3 shadow-sm ring-1 ring-slate-200 transition",
-        draggable && "cursor-grab active:cursor-grabbing hover:ring-brand-300",
-        awaiting && "ring-2 ring-brand-200",
+        "group relative rounded-lg p-3 shadow-sm ring-1 transition",
+        alert === "none" && "bg-white ring-slate-200",
+        alert === "warning" && "bg-amber-200 ring-amber-400",
+        alert === "overdue" && "bg-red-200 ring-red-400",
+        draggable && "cursor-grab active:cursor-grabbing",
+        draggable && alert === "none" && "hover:ring-brand-300",
         card.pending && "opacity-70",
       )}
     >

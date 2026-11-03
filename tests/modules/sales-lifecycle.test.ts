@@ -195,13 +195,14 @@ describe("edição de venda", () => {
     await expectError(updateSale(sup, saleId, { expectedVersion: await version(saleId), removeItemIds: [item.id] }), ValidationError, ITEM_NOT_IN_SALE);
   });
 
-  it("item novo usa o custo vigente; os antigos mantêm o da época", async () => {
+  it("item novo usa o custo e a comissão vigentes; os antigos mantêm os da época", async () => {
     const own = await insertCourseWithCost(handle, `Reajuste ${++seq}`, 20_000);
     const leadId = await newLead(org.ids.sellerA1);
     const { saleId } = await createSale(await ctx(org.ids.sellerA1), saleInput(leadId, own));
-    await updateCourse(await ctx(org.ids.admin), own, { scholarshipCostCents: 26_000 });
+    await updateCourse(await ctx(org.ids.admin), own, { scholarshipCostCents: 26_000, commissionCents: 175_00 });
     await updateSale(await ctx(org.ids.sellerA1), saleId, { expectedVersion: await version(saleId), addItems: [{ courseId: own, priceCents: 150_000 }] });
     expect((await itemsOf(saleId)).map((i) => i.costSnapshotCents)).toEqual([20_000, 26_000]);
+    expect((await itemsOf(saleId)).map((i) => i.commissionSnapshotCents)).toEqual([100_00, 175_00]);
   });
 
   it("troca de responsável (SUPERVISOR): venda e lead vão para a equipe atual do novo vendedor; histórico completo", async () => {

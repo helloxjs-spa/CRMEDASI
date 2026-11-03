@@ -70,6 +70,10 @@ const MATRIX = {
   "certificates:operate": ["ADMIN", "SUPERVISOR", "SELLER"],
   "ranking:view": ["ADMIN", "SUPERVISOR", "SELLER"],
   "reports:export": ["ADMIN", "SUPERVISOR"],
+  /** Card "Resultado do mês": todos veem o resultado e a meta de todos os vendedores (decisão do cliente). */
+  "goals:view": ["ADMIN", "SUPERVISOR", "SELLER"],
+  /** Definir meta mensal: ADMIN de qualquer vendedor; SUPERVISOR só dos vendedores da equipe que lidera (escopo no serviço). */
+  "goals:manage": ["ADMIN", "SUPERVISOR"],
 } as const satisfies Record<string, readonly UserRole[]>;
 
 export type Permission = keyof typeof MATRIX;

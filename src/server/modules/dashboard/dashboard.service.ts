@@ -16,7 +16,7 @@ import { parseInput } from "@/server/validation";
  *   Faturamento = soma de `sales.total_cents` (valor vendido, não parcelas
  *   recebidas); o banco garante que ele é a soma dos preços dos itens atuais.
  * - Comissão = soma de `commission_snapshot_cents` dos itens atuais (não
- *   removidos) — a mesma regra do detalhe da venda (§14, R$ 100 por curso).
+ *   removidos) — a mesma regra do detalhe da venda (§14; valor de cada curso, copiado na venda).
  * - Custo = soma de `cost_snapshot_cents` dos itens atuais; Lucro = faturamento
  *   − custo (§13; comissão não entra). Somente `finance:viewCostAndProfit`
  *   (ADMIN): para os demais, custo e lucro nem são consultados.

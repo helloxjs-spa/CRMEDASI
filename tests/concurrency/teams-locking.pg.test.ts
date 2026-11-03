@@ -36,7 +36,7 @@ beforeAll(async () => {
   if (!REAL_PG_URL) return;
   db = await createRealPgDatabase();
   monitor = await db.client("crm-test-monitor");
-  await monitor.query(`INSERT INTO courses (id, name, institution_name) VALUES ('${COURSE}', 'Pedagogia', 'Faculdade Teste')`);
+  await monitor.query(`INSERT INTO courses (id, name, institution_name, commission_cents) VALUES ('${COURSE}', 'Pedagogia', 'Faculdade Teste', 10000)`);
 }, 120_000);
 
 afterAll(async () => {

@@ -11,7 +11,7 @@ CRM web para a operação comercial do **Grupo EDASI** (Educação, Segurança e
 - **Fundação:** autenticação, perfis (Administrador, Supervisor, Vendedor), equipes, autorização no backend (RBAC + ownership + escopo de equipe), auditoria e layout autenticado.
 - **Cursos:** curso + instituição, com custo da bolsa visível e editável só pelo administrador; lista de cursos ativos (curso e instituição, sem custo) para os demais perfis.
 - **Leads:** tela `/leads` com busca, filtros, paginação, drawer com histórico e fila de decisão do supervisor; cadastro com telefone brasileiro canônico e único (inclusive na Lixeira), carteira por vendedor, transferência, fila do supervisor (vendedor desativado e Follow-up 3 vencido), redistribuição com ciclos de Retrabalho, Lixeira e recuperação, observações e linha do tempo.
-- **Kanban:** quadro `/kanban` com transições validadas no backend, prazos de 24 h, Follow-up 3 vencido aguardando o supervisor e bloqueio do vendedor com negociação vencida.
+- **Kanban:** quadro `/kanban` com transições validadas no backend, prazos de 8 h nos follow-ups e 24 h na negociação, Follow-up 3 vencido aguardando o supervisor e bloqueio do vendedor com negociação vencida.
 
 Os módulos comerciais seguintes aparecem no menu como "em breve".
 
@@ -40,7 +40,7 @@ cp .env.example .env      # Windows (PowerShell): Copy-Item .env.example .env
 npm run dev               # http://localhost:3000
 ```
 
-**Connection string:** no painel do Supabase, use **Connect › Session pooler** (porta 5432) ou a conexão direta, e acrescente `?sslmode=require`. Nunca faça commit do `.env`.
+**Connection string:** no painel do Supabase, use **Connect › Session pooler** (porta 5432) ou a conexão direta, e acrescente `?sslmode=verify-full&sslrootcert=certs/prod-ca-2021.crt` (certificado baixado em **Database › Settings › SSL Configuration** e salvo em `certs/`). Nunca faça commit do `.env`.
 
 **Primeiro acesso:** o banco começa vazio. Crie o primeiro administrador com:
 

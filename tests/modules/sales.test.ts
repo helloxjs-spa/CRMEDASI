@@ -22,7 +22,7 @@ import {
 } from "@/server/modules/sales/sales.service";
 import { changeSellerTeam } from "@/server/modules/users/users.service";
 import { createTestDatabase, insertUser, seedOrganization } from "../support/db";
-import { setLeadStage } from "../support/leads";
+import { setLeadStage, TEST_COMMISSION_CENTS } from "../support/leads";
 import { insertCourseWithCost, saleInput } from "../support/sales";
 
 let handle: DatabaseHandle;
@@ -88,7 +88,7 @@ describe("registro de venda", () => {
       createdBy: org.ids.sellerA1,
     });
     expect(await itemsOf(result.saleId)).toMatchObject([
-      { courseId: course, costSnapshotCents: 40_000, commissionSnapshotCents: BUSINESS_RULES.commissionPerItemCents, removedAt: null },
+      { courseId: course, costSnapshotCents: 40_000, commissionSnapshotCents: TEST_COMMISSION_CENTS, removedAt: null },
     ]);
     expect(await leadRow(leadId)).toMatchObject({ stage: "CLOSED", ownerId: org.ids.sellerA1, stageDueAt: null, status: "ACTIVE" });
     expect(await cyclesOf(leadId)).toMatchObject([{ number: 1, endReason: "WON", endedBy: org.ids.sellerA1 }]);
@@ -177,7 +177,7 @@ describe("registro de venda", () => {
   it("curso sem custo de bolsa cadastrado é recusado", async () => {
     const [noCost] = await handle.db
       .insert((await import("@/server/db/schema")).courses)
-      .values({ name: "Curso Sem Custo", institutionName: "Faculdade Teste" })
+      .values({ name: "Curso Sem Custo", institutionName: "Faculdade Teste", commissionCents: TEST_COMMISSION_CENTS })
       .returning();
     const leadId = await newLead();
     const error = await createSale(await ctx(org.ids.sellerA1), saleInput(leadId, noCost.id)).catch((e: unknown) => e);
@@ -195,6 +195,35 @@ describe("registro de venda", () => {
 
     expect((await itemsOf(old.saleId))[0].costSnapshotCents).toBe(30_000);
     expect((await itemsOf(recent.saleId))[0].costSnapshotCents).toBe(45_000);
+  });
+
+  it("cada item recebe a comissão do próprio curso", async () => {
+    const barato = await insertCourseWithCost(handle, "Comissão Baixa", 30_000, true, 50_00);
+    const caro = await insertCourseWithCost(handle, "Comissão Alta", 30_000, true, 350_00);
+    const sale = await createSale(
+      await ctx(org.ids.sellerA1),
+      saleInput(await newLead(), barato, {
+        items: [
+          { courseId: barato, priceCents: 100_000 },
+          { courseId: caro, priceCents: 100_000 },
+        ],
+      }),
+    );
+    const items = await itemsOf(sale.saleId);
+    const commissionOf = (courseId: string) => items.find((item) => item.courseId === courseId)!.commissionSnapshotCents;
+    expect(commissionOf(barato)).toBe(50_00);
+    expect(commissionOf(caro)).toBe(350_00);
+  });
+
+  it("snapshots: mudar a comissão do curso depois não altera vendas antigas", async () => {
+    const own = await insertCourseWithCost(handle, "Comissão Reajustada", 30_000, true, 100_00);
+    const seller = await ctx(org.ids.sellerA1);
+    const old = await createSale(seller, saleInput(await newLead(), own));
+    await updateCourse(await ctx(org.ids.admin), own, { commissionCents: 175_00 });
+    const recent = await createSale(seller, saleInput(await newLead(), own));
+
+    expect((await itemsOf(old.saleId))[0].commissionSnapshotCents).toBe(100_00);
+    expect((await itemsOf(recent.saleId))[0].commissionSnapshotCents).toBe(175_00);
   });
 
   it("lead com Follow-up 3 vencido pode receber venda (C37); o histórico é preservado", async () => {

@@ -12,12 +12,14 @@ function CourseFields({
   name,
   institutionName,
   costCents,
+  commissionCents,
 }: {
   errors: Record<string, string[]>;
   idPrefix: string;
   name?: string;
   institutionName?: string;
   costCents?: number;
+  commissionCents?: number;
 }) {
   return (
     <>
@@ -54,6 +56,21 @@ function CourseFields({
           required
         />
       </Field>
+      <Field
+        label="Comissão (R$)"
+        htmlFor={`${idPrefix}-commission`}
+        errors={errors.commissionCents}
+        hint="Por curso vendido. Ao alterar, vale só para as próximas vendas."
+      >
+        <Input
+          id={`${idPrefix}-commission`}
+          name="commission"
+          inputMode="decimal"
+          placeholder="0,00"
+          defaultValue={commissionCents !== undefined ? centsToInput(commissionCents) : undefined}
+          required
+        />
+      </Field>
     </>
   );
 }
@@ -69,13 +86,13 @@ export function CreateCourseDialog() {
 export function EditCourseDialog({
   course,
 }: {
-  course: { id: string; name: string; institutionName: string; scholarshipCostCents: number };
+  course: { id: string; name: string; institutionName: string; scholarshipCostCents: number; commissionCents: number };
 }) {
   return (
     <ActionDialog
       trigger={{ label: "Editar", icon: Pencil, variant: "ghost", size: "sm" }}
       title="Editar curso"
-      description="A alteração de custo fica registrada na auditoria."
+      description="A alteração de custo e de comissão fica registrada na auditoria."
       action={updateCourseAction}
     >
       {(errors) => (
@@ -87,6 +104,7 @@ export function EditCourseDialog({
             name={course.name}
             institutionName={course.institutionName}
             costCents={course.scholarshipCostCents}
+            commissionCents={course.commissionCents}
           />
         </>
       )}

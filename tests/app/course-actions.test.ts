@@ -37,7 +37,7 @@ function form(fields: Record<string, string>): FormData {
 beforeAll(async () => {
   handle = await createTestDatabase();
   org = await seedOrganization(handle);
-  courseId = (await createCourse(await org.ctx(org.ids.admin), { name: "Administração", institutionName: "Faculdade Alpha", scholarshipCostCents: 432_10 })).id;
+  courseId = (await createCourse(await org.ctx(org.ids.admin), { name: "Administração", institutionName: "Faculdade Alpha", scholarshipCostCents: 432_10, commissionCents: 100_00 })).id;
 });
 afterAll(() => handle.close());
 
@@ -46,8 +46,8 @@ describe("Server Actions de cursos chamadas diretamente", () => {
     it(`${who}: recebe erro de permissão sem nenhum dado do curso ou custo`, async () => {
       session.current = await org.ctx(org.ids[who]);
       const results = [
-        await createCourseAction(IDLE, form({ name: "Invasão", institutionName: "X Y", scholarshipCost: "1,00" })),
-        await updateCourseAction(IDLE, form({ courseId, name: "Invasão", institutionName: "X Y", scholarshipCost: "1,00" })),
+        await createCourseAction(IDLE, form({ name: "Invasão", institutionName: "X Y", scholarshipCost: "1,00", commission: "1,00" })),
+        await updateCourseAction(IDLE, form({ courseId, name: "Invasão", institutionName: "X Y", scholarshipCost: "1,00", commission: "1,00" })),
         await setCourseActiveAction(IDLE, form({ courseId, active: "false" })),
       ];
       for (const result of results) {
@@ -68,19 +68,28 @@ describe("Server Actions de cursos chamadas diretamente", () => {
 
   it("admin: cria e altera custo em reais, convertido para centavos", async () => {
     session.current = await org.ctx(org.ids.admin);
-    const created = await createCourseAction(IDLE, form({ name: "Direito", institutionName: "Universidade Gama", scholarshipCost: "1.234,56" }));
+    const created = await createCourseAction(IDLE, form({ name: "Direito", institutionName: "Universidade Gama", scholarshipCost: "1.234,56", commission: "150,50" }));
     expect(created).toMatchObject({ status: "success" });
     const [row] = await handle.db
-      .select({ cost: courseCosts.costCents })
+      .select({ cost: courseCosts.costCents, commission: courses.commissionCents })
       .from(courses)
       .innerJoin(courseCosts, eq(courseCosts.courseId, courses.id))
       .where(eq(courses.name, "Direito"));
     expect(row.cost).toBe(1234_56);
+    expect(row.commission).toBe(150_50);
   });
 
   it("admin: custo inválido aponta erro no campo", async () => {
     session.current = await org.ctx(org.ids.admin);
-    const result = await createCourseAction(IDLE, form({ name: "Medicina", institutionName: "Universidade Gama", scholarshipCost: "abc" }));
+    const result = await createCourseAction(IDLE, form({ name: "Medicina", institutionName: "Universidade Gama", scholarshipCost: "abc", commission: "100,00" }));
     expect(result).toMatchObject({ status: "error", fieldErrors: { scholarshipCostCents: ["Informe um custo válido (ex.: 300,00)."] } });
+  });
+
+  it("admin: comissão vazia ou inválida aponta erro no campo", async () => {
+    session.current = await org.ctx(org.ids.admin);
+    for (const commission of ["", "abc"]) {
+      const result = await createCourseAction(IDLE, form({ name: "Medicina", institutionName: "Universidade Gama", scholarshipCost: "100,00", commission }));
+      expect(result).toMatchObject({ status: "error", fieldErrors: { commissionCents: ["Informe uma comissão válida (ex.: 100,00)."] } });
+    }
   });
 });

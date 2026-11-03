@@ -14,12 +14,18 @@ function costField(formData: FormData): number | undefined {
   return parseBRLToCents(text(formData, "scholarshipCost")) ?? undefined;
 }
 
+/** Comissão digitada em reais → centavos; undefined faz o serviço apontar o erro no campo. */
+function commissionField(formData: FormData): number | undefined {
+  return parseBRLToCents(text(formData, "commission")) ?? undefined;
+}
+
 export async function createCourseAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   return runAction(async (ctx) => {
     await createCourse(ctx, {
       name: text(formData, "name"),
       institutionName: text(formData, "institutionName"),
       scholarshipCostCents: costField(formData),
+      commissionCents: commissionField(formData),
     });
     revalidatePath("/cursos");
     return "Curso criado com sucesso.";
@@ -32,6 +38,7 @@ export async function updateCourseAction(_prev: ActionState, formData: FormData)
       name: text(formData, "name"),
       institutionName: text(formData, "institutionName"),
       scholarshipCostCents: costField(formData),
+      commissionCents: commissionField(formData),
     });
     revalidatePath("/cursos");
     return "Curso atualizado.";

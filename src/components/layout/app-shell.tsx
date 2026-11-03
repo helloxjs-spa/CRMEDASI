@@ -92,8 +92,8 @@ export function AppShell({ navigation, header, children }: { navigation: NavSect
 function Sidebar({ navigation, pathname }: { navigation: NavSection[]; pathname: string }) {
   return (
     <nav className="flex h-full flex-col overflow-y-auto bg-brand-800 px-3 py-4 text-brand-100" aria-label="Navegação principal">
-      <Link href="/" className="mb-6 flex items-center border-b border-white/10 px-3 pb-5 pt-1" aria-label="Grupo EDASI — Início">
-        <EdasiWordmark className="text-[1.9rem]" />
+      <Link href="/" className="mb-6 flex items-center justify-center border-b border-white/10 px-3 pb-5 pt-1" aria-label="Grupo EDASI — Início">
+        <EdasiWordmark className="text-center text-[1.9rem]" />
       </Link>
 
       <div className="flex-1 space-y-6">

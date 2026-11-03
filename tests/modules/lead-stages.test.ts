@@ -177,7 +177,7 @@ describe("prazos", () => {
     expect(hoursFromNow(renewed.stageDueAt)).toBeCloseTo(24, 1);
 
     await moveLeadStage(seller, id, { toStage: "FOLLOW_UP_1" });
-    expect(hoursFromNow((await rowOf(id)).stageDueAt)).toBeCloseTo(24, 1);
+    expect(hoursFromNow((await rowOf(id)).stageDueAt)).toBeCloseTo(8, 1);
 
     const other = await newLead(org.ids.sellerA1);
     await moveLeadStage(seller, other, { toStage: "NO_ANSWER" });

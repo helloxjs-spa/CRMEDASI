@@ -8,7 +8,8 @@ import { users } from "./organization";
  * com custos diferentes). Propositalmente SEM coluna de custo: qualquer
  * consulta a esta tabela (inclusive `select *`) é segura para vendedor e
  * supervisor. Cursos nunca são apagados; usa-se `active`.
- * Espelha database/migrations/001_supabase_initial_schema.sql.
+ * `commissionCents`: comissão por item vendido, copiada em sale_items na venda.
+ * Espelha database/migrations/001_supabase_initial_schema.sql e 008_course_commission.sql.
  */
 export const courses = pgTable(
   "courses",
@@ -17,12 +18,14 @@ export const courses = pgTable(
     name: text("name").notNull(),
     institutionName: text("institution_name").notNull(),
     active: boolean("active").notNull().default(true),
+    commissionCents: integer("commission_cents").notNull(),
     ...timestamps,
   },
   (t) => [
     uniqueIndex("courses_name_institution_unique").on(sql`lower(btrim(${t.name}))`, sql`lower(btrim(${t.institutionName}))`),
     check("courses_name_not_blank", sql`btrim(${t.name}) <> ''`),
     check("courses_institution_not_blank", sql`btrim(${t.institutionName}) <> ''`),
+    check("courses_commission_non_negative", sql`${t.commissionCents} >= 0`),
   ],
 );
 

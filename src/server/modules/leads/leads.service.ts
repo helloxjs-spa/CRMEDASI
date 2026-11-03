@@ -970,7 +970,7 @@ export async function addLeadNote({ db, actor }: ServiceContext, rawId: unknown,
  * Move o lead para outra etapa, validando no backend, nesta ordem: permissão
  * e escopo (lead próprio e ativo), negociação vencida em OUTRO lead, transição
  * permitida (STAGE_TRANSITIONS) e Follow-up 3 vencido. Define a entrada na
- * etapa e o prazo (24 h corridas nas etapas com prazo; nenhum nas demais) e
+ * etapa e o prazo (horas corridas de BUSINESS_RULES nas etapas com prazo; nenhum nas demais) e
  * grava STAGE_CHANGED, tudo na mesma transação.
  */
 export async function moveLeadStage({ db, actor }: ServiceContext, rawId: unknown, input: unknown): Promise<LeadView> {

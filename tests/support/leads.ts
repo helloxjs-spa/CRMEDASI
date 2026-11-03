@@ -3,8 +3,11 @@ import type { DatabaseHandle } from "@/server/db/connect";
 import { courses, leads, type LeadStage } from "@/server/db/schema";
 
 /** Curso ativo para os cadastros de lead dos testes. */
-export async function insertCourse(handle: DatabaseHandle, name = "Pedagogia", active = true): Promise<string> {
-  const [course] = await handle.db.insert(courses).values({ name, institutionName: "Faculdade Teste", active }).returning({ id: courses.id });
+/** Comissão padrão dos cursos criados nos testes (R$ 100,00). */
+export const TEST_COMMISSION_CENTS = 100_00;
+
+export async function insertCourse(handle: DatabaseHandle, name = "Pedagogia", active = true, commissionCents = TEST_COMMISSION_CENTS): Promise<string> {
+  const [course] = await handle.db.insert(courses).values({ name, institutionName: "Faculdade Teste", active, commissionCents }).returning({ id: courses.id });
   return course.id;
 }
 

@@ -15,21 +15,23 @@
   --color-brand-900: #0e162c;
   --color-brand-950: #080d1c;
 
-  /* Azul claro de destaque sobre o azul-marinho (ícones e realces) = accent-200. */
-  --color-accent-50: #f0f6ff;
-  --color-accent-100: #e0edff;
-  --color-accent-200: #c2dbff;
-  --color-accent-300: #94c0ff;
-  --color-accent-400: #5e9bf7;
-  --color-accent-500: #3b7bea;
-  --color-accent-600: #2a5fcf;
-  --color-accent-700: #234ca8;
-  --color-accent-800: #213f86;
-  --color-accent-900: #1f376b;
+  /* Azul-céu de destaque sobre o azul-marinho (realces do login = accent-400). */
+  --color-accent-50: #f0f8ff;
+  --color-accent-100: #e0effe;
+  --color-accent-200: #c4e3fc;
+  --color-accent-300: #93cbf8;
+  --color-accent-400: #5eb0f2;
+  --color-accent-500: #3a95e3;
+  --color-accent-600: #2577c6;
+  --color-accent-700: #205fa0;
+  --color-accent-800: #1f5084;
+  --color-accent-900: #1f446e;
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   /* Sans pesada próxima à do logotipo; só para a marca. */
   --font-display: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  /* Títulos de destaque (tela de login). */
+  --font-heading: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 

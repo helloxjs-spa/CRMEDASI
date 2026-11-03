@@ -9,6 +9,7 @@ import { buildReport, type Report } from "@/server/modules/reports/reports.servi
 import { createSale, getSale, reverseSale } from "@/server/modules/sales/sales.service";
 import { changeSellerTeam } from "@/server/modules/users/users.service";
 import { createTestDatabase, insertUser, seedOrganization } from "../support/db";
+import { TEST_COMMISSION_CENTS } from "../support/leads";
 import { insertCourseWithCost } from "../support/sales";
 
 /**
@@ -100,7 +101,7 @@ describe("vendas e itens", () => {
     expect(column(await report(org.ids.admin, "sales", { ...JUL, status: "REVERSED" }), "Situação")).toEqual(["Estornada"]);
     const items = await report(org.ids.admin, "items", { ...JUL, status: "ACTIVE" });
     expect(items.rows).toHaveLength(4);
-    expect(column(items, "Comissão")).toEqual(Array(4).fill({ cents: BUSINESS_RULES.commissionPerItemCents }));
+    expect(column(items, "Comissão")).toEqual(Array(4).fill({ cents: TEST_COMMISSION_CENTS }));
   });
 });
 

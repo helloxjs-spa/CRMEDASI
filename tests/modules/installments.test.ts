@@ -1,6 +1,5 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { BUSINESS_RULES } from "@/server/config/business-rules";
 import type { DatabaseHandle } from "@/server/db/connect";
 import { MAX_INSTALLMENTS } from "@/lib/installments";
 import { auditEvents, installments, saleItems, sales } from "@/server/db/schema";
@@ -19,6 +18,7 @@ import { createLead } from "@/server/modules/leads/leads.service";
 import { createSale, getSale, reactivateSale, reverseSale, updateSale } from "@/server/modules/sales/sales.service";
 import { changeSellerTeam } from "@/server/modules/users/users.service";
 import { createTestDatabase, insertUser, seedOrganization } from "../support/db";
+import { TEST_COMMISSION_CENTS } from "../support/leads";
 import { insertCourseWithCost } from "../support/sales";
 
 let handle: DatabaseHandle;
@@ -97,7 +97,7 @@ describe("cronograma gerado com a venda (C52)", () => {
     await sale(org.ids.sellerA1, { date: "2026-02-10", count: 2, prices: [20_000] });
     const after = await getSalesIndicators(await ctx(org.ids.admin), { dateFrom: "2026-02-01", dateTo: "2026-02-28" });
     expect(after.revenueCents - before.revenueCents).toBe(20_000);
-    expect(after.commissionCents - before.commissionCents).toBe(BUSINESS_RULES.commissionPerItemCents);
+    expect(after.commissionCents - before.commissionCents).toBe(TEST_COMMISSION_CENTS);
   });
 });
 

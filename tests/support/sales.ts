@@ -1,11 +1,17 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseHandle } from "@/server/db/connect";
 import { courseCosts } from "@/server/db/schema";
-import { insertCourse } from "./leads";
+import { insertCourse, TEST_COMMISSION_CENTS } from "./leads";
 
 /** Curso com custo de bolsa cadastrado (necessário para vender). */
-export async function insertCourseWithCost(handle: DatabaseHandle, name: string, costCents: number, active = true): Promise<string> {
-  const id = await insertCourse(handle, name, active);
+export async function insertCourseWithCost(
+  handle: DatabaseHandle,
+  name: string,
+  costCents: number,
+  active = true,
+  commissionCents = TEST_COMMISSION_CENTS,
+): Promise<string> {
+  const id = await insertCourse(handle, name, active, commissionCents);
   await handle.db.insert(courseCosts).values({ courseId: id, costCents });
   return id;
 }

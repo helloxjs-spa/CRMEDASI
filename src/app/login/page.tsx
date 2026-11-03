@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { BarChart3, ShieldCheck, Users } from "lucide-react";
+import { BarChart3, Lock, ShieldCheck, Users } from "lucide-react";
 import { redirect } from "next/navigation";
 import { EdasiLogo, EdasiMark, EdasiWordmark } from "@/components/brand/edasi";
 import { getCurrentActor } from "@/server/next/session";
@@ -21,29 +21,46 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
 
   return (
     <main className="grid min-h-screen lg:grid-cols-2">
-      <section className="relative hidden overflow-hidden bg-brand-800 p-12 text-white lg:flex lg:flex-col lg:justify-between">
-        <EdasiMark className="absolute -bottom-40 -right-24 size-[34rem] opacity-[0.06]" />
-        <EdasiLogo className="relative max-w-sm" priority />
-        <div className="relative max-w-md">
-          <p className="font-display text-sm font-semibold tracking-[0.2em] text-accent-200">CRM COMERCIAL</p>
-          <h1 className="mt-3 text-3xl font-semibold leading-tight">Disciplina comercial do primeiro contato à matrícula.</h1>
-          <ul className="mt-8 space-y-4">
+      <section className="relative hidden overflow-hidden bg-linear-to-br from-brand-950 via-brand-900 to-brand-700 px-12 py-14 text-white lg:flex lg:flex-col lg:justify-between xl:px-24">
+        {/* "E" da marca como forma decorativa à direita. */}
+        <EdasiMark className="pointer-events-none absolute -right-40 top-1/2 size-[48rem] -translate-y-1/2 opacity-[0.07]" />
+
+        <div className="relative">
+          <EdasiLogo className="max-w-[20rem]" priority />
+          <span className="mt-4 block h-1 w-24 rounded-full bg-accent-400" aria-hidden />
+          <p className="mt-4 text-base tracking-[0.06em] text-white/90">Educação, Segurança e Inovação em Saúde</p>
+        </div>
+
+        <div className="relative max-w-xl">
+          <p className="font-heading text-sm font-bold tracking-[0.2em] text-accent-400">CRM COMERCIAL</p>
+          <h1 className="mt-3 max-w-[32rem] font-heading text-[2rem] font-extrabold leading-[1.2] tracking-[-0.01em]">
+            Disciplina comercial do primeiro contato <span className="text-accent-400">à matrícula.</span>
+          </h1>
+          <ul className="mt-6 space-y-3">
             {highlights.map(({ icon: Icon, text }) => (
-              <li key={text} className="flex items-center gap-3 text-brand-100">
-                <Icon className="size-5 text-accent-200" aria-hidden />
+              <li key={text} className="flex items-center gap-4 text-white/95">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white/5 ring-1 ring-white/20">
+                  <Icon className="size-5" aria-hidden />
+                </span>
                 {text}
               </li>
             ))}
           </ul>
         </div>
-        <p className="relative text-xs text-brand-200">Uso interno · acesso restrito a colaboradores</p>
+
+        <div className="relative max-w-sm border-t border-white/15 pt-6">
+          <p className="flex items-center gap-3 text-sm text-white/85">
+            <Lock className="size-5" aria-hidden />
+            Uso interno · acesso restrito a colaboradores
+          </p>
+        </div>
       </section>
 
       <section className="flex items-center justify-center px-4 py-12 sm:px-8">
-        <div className="w-full max-w-sm">
+        <div className="w-full max-w-[26rem]">
           <EdasiWordmark tone="dark" className="mb-8 text-3xl lg:hidden" />
-          <h2 className="text-2xl font-semibold tracking-tight text-slate-900">Entrar no CRM</h2>
-          <p className="mt-1 text-sm text-slate-500">Use o e-mail e a senha fornecidos pelo administrador.</p>
+          <h2 className="text-[1.75rem] font-semibold tracking-tight text-slate-900">Entrar no CRM</h2>
+          <p className="mt-1 text-[0.95rem] text-slate-500">Use o e-mail e a senha fornecidos pelo administrador.</p>
           <LoginForm next={typeof next === "string" ? next : ""} />
         </div>
       </section>

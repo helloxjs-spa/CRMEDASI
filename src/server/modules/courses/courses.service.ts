@@ -28,6 +28,8 @@ export type CourseWithCost = {
   institutionName: string;
   active: boolean;
   scholarshipCostCents: number;
+  /** Comissão por item vendido; copiada em sale_items no momento da venda. */
+  commissionCents: number;
   createdAt: Date;
   updatedAt: Date;
   costUpdatedAt: Date;
@@ -55,6 +57,12 @@ const costCentsSchema = z
   .number({ error: "Informe um custo válido (ex.: 300,00)." })
   .int("Informe um custo válido (ex.: 300,00).")
   .min(0, "O custo não pode ser negativo.")
+  .max(MAX_COST_CENTS, "Valor acima do limite permitido.");
+
+const commissionCentsSchema = z
+  .number({ error: "Informe uma comissão válida (ex.: 100,00)." })
+  .int("Informe uma comissão válida (ex.: 100,00).")
+  .min(0, "A comissão não pode ser negativa.")
   .max(MAX_COST_CENTS, "Valor acima do limite permitido.");
 
 // ---------------------------------------------------------------------------
@@ -93,6 +101,7 @@ const courseWithCost = {
   institutionName: courses.institutionName,
   active: courses.active,
   scholarshipCostCents: courseCosts.costCents,
+  commissionCents: courses.commissionCents,
   createdAt: courses.createdAt,
   updatedAt: courses.updatedAt,
   costUpdatedAt: courseCosts.updatedAt,
@@ -143,6 +152,7 @@ const createCourseSchema = z.strictObject({
   name: courseNameSchema,
   institutionName: institutionNameSchema,
   scholarshipCostCents: costCentsSchema,
+  commissionCents: commissionCentsSchema,
 });
 
 export async function createCourse({ db, actor }: ServiceContext, input: unknown): Promise<CourseWithCost> {
@@ -151,14 +161,14 @@ export async function createCourse({ db, actor }: ServiceContext, input: unknown
 
   try {
     const id = await db.transaction(async (tx) => {
-      const [created] = await tx.insert(courses).values({ name: data.name, institutionName: data.institutionName }).returning({ id: courses.id });
+      const [created] = await tx.insert(courses).values({ name: data.name, institutionName: data.institutionName, commissionCents: data.commissionCents }).returning({ id: courses.id });
       await tx.insert(courseCosts).values({ courseId: created.id, costCents: data.scholarshipCostCents, updatedBy: actor.userId });
       await recordAudit(tx, {
         actorId: actor.userId,
         action: "course.created",
         entityType: "course",
         entityId: created.id,
-        metadata: { name: data.name, institutionName: data.institutionName, scholarshipCostCents: data.scholarshipCostCents },
+        metadata: { name: data.name, institutionName: data.institutionName, scholarshipCostCents: data.scholarshipCostCents, commissionCents: data.commissionCents },
       });
       return created.id;
     });
@@ -173,6 +183,7 @@ const updateCourseSchema = z.strictObject({
   name: courseNameSchema.optional(),
   institutionName: institutionNameSchema.optional(),
   scholarshipCostCents: costCentsSchema.optional(),
+  commissionCents: commissionCentsSchema.optional(),
 });
 
 export async function updateCourse({ db, actor }: ServiceContext, rawId: unknown, input: unknown): Promise<CourseWithCost> {
@@ -215,6 +226,22 @@ export async function updateCourse({ db, actor }: ServiceContext, rawId: unknown
             name: data.name ?? before.name,
             institutionName: data.institutionName ?? before.institutionName,
             fromCents: before.scholarshipCostCents, toCents: data.scholarshipCostCents,
+          },
+        });
+      }
+
+      // Vale para as próximas vendas: as registradas mantêm o snapshot em sale_items.
+      if (data.commissionCents !== undefined && data.commissionCents !== before.commissionCents) {
+        await tx.update(courses).set({ commissionCents: data.commissionCents }).where(eq(courses.id, id));
+        await recordAudit(tx, {
+          actorId: actor.userId,
+          action: "course.commission_changed",
+          entityType: "course",
+          entityId: id,
+          metadata: {
+            name: data.name ?? before.name,
+            institutionName: data.institutionName ?? before.institutionName,
+            fromCents: before.commissionCents, toCents: data.commissionCents,
           },
         });
       }

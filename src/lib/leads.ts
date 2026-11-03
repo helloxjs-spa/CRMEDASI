@@ -59,7 +59,7 @@ export const STAGE_TRANSITIONS: Record<LeadStage, readonly LeadStage[]> = {
   CLOSED: [],
 };
 
-/** Etapas com prazo (24 h corridas a partir da entrada). As demais não têm prazo. */
+/** Etapas com prazo (horas corridas a partir da entrada: BUSINESS_RULES). As demais não têm prazo. */
 export const STAGES_WITH_DEADLINE: readonly LeadStage[] = ["FOLLOW_UP_1", "FOLLOW_UP_2", "FOLLOW_UP_3", "NEGOTIATION"];
 
 export function canTransition(from: LeadStage, to: LeadStage): boolean {
@@ -116,4 +116,23 @@ export function deadlineInfo(lead: DeadlineFields, now: Date): DeadlineInfo {
   if (!dueAt) return { kind: "none" };
   if (dueAt < now) return lead.stage === "FOLLOW_UP_3" ? { kind: "awaiting_supervisor", dueAt } : { kind: "overdue", dueAt };
   return sameBusinessDay(dueAt, now) ? { kind: "due_today", dueAt } : { kind: "on_time", dueAt };
+}
+
+export type FollowUpAlert = "none" | "warning" | "overdue";
+
+const FOLLOW_UP_STAGES: readonly LeadStage[] = ["FOLLOW_UP_1", "FOLLOW_UP_2", "FOLLOW_UP_3"];
+
+/**
+ * Cor do card do Kanban nas etapas de follow-up (C55): amarelo a partir de
+ * `followUpWarningHours` na etapa e vermelho depois do prazo. Conta a partir do
+ * prazo gravado, que a transferência de responsável não reinicia. Lead sem
+ * responsável, na Lixeira ou em outra etapa não muda de cor.
+ */
+export function followUpAlert(lead: DeadlineFields, now: Date): FollowUpAlert {
+  if (!FOLLOW_UP_STAGES.includes(lead.stage)) return "none";
+  const info = deadlineInfo(lead, now);
+  if (info.kind === "overdue" || info.kind === "awaiting_supervisor") return "overdue";
+  if (info.kind !== "due_today" && info.kind !== "on_time") return "none";
+  const warningLeadMs = (BUSINESS_RULES.followUpDeadlineHours - BUSINESS_RULES.followUpWarningHours) * 3_600_000;
+  return now.getTime() >= info.dueAt.getTime() - warningLeadMs ? "warning" : "none";
 }

@@ -7,7 +7,7 @@
 - Recursos com dono (leads, vendas, parcelas, certificados) SEMPRE compõem `ownedScope()` no WHERE, inclusive em busca por ID. Fora do escopo → `NotFoundError`.
 - Server Actions são finas: `runAction(ctx => service(ctx, {campos explícitos}))`. Nunca passe `Object.fromEntries(formData)` para um serviço.
 - Custos de bolsa e lucro: somente atrás de `courses:viewCost` / `finance:viewCostAndProfit`. Nunca inclua custo em payload de vendedor ou supervisor.
-- Dinheiro em centavos (integer). Fuso e parâmetros de negócio em `src/server/config/business-rules.ts`; não repita valores (ex.: comissão) em outros arquivos.
+- Dinheiro em centavos (integer). Fuso e parâmetros de negócio em `src/server/config/business-rules.ts`; não repita valores em outros arquivos. A comissão é de cada curso (`courses.commission_cents`), copiada em `sale_items` na venda.
 - Nenhuma exclusão física de registros de negócio.
 - Banco oficial: Supabase (só Postgres; sem Supabase Auth). Mudança de schema = NOVO arquivo `database/migrations/NNN_nome.sql` (com RLS + `REVOKE ALL ... FROM anon, authenticated` em tabelas novas), entregue ao usuário para execução manual no SQL Editor; PARE até ele confirmar. Nunca edite um SQL já executado; nunca aplique schema no Supabase pelo código; nunca imprima `DATABASE_URL`/segredos. Atualize o schema Drizzle para espelhar o SQL (o teste de paridade em `tests/db` confere).
 - Antes de concluir: `npm run check`.

@@ -4,7 +4,7 @@ import { boardParams, createdRangeInverted, hasResultFilters, leadsHref, parseLe
 import type { Actor } from "@/server/authz/actor";
 import { formatRelativeDateTime } from "@/lib/format";
 import { describeLeadEvent } from "@/lib/lead-timeline";
-import { deadlineInfo, STAGE_ORDER, stageFromSlug, stageToSlug } from "@/lib/leads";
+import { deadlineInfo, followUpAlert, STAGE_ORDER, stageFromSlug, stageToSlug } from "@/lib/leads";
 import { LEAD_STAGES } from "@/server/db/schema";
 import type { LeadTimelineEntry } from "@/server/modules/leads/leads.service";
 
@@ -20,6 +20,38 @@ describe("etapas", () => {
     for (const stage of STAGE_ORDER) expect(stageFromSlug(stageToSlug(stage))).toBe(stage);
     expect(stageToSlug("FOLLOW_UP_1")).toBe("follow-up-1");
     expect(stageFromSlug("qualquer")).toBeUndefined();
+  });
+});
+
+describe("cor do card de follow-up (6 h amarelo, depois de 8 h vermelho)", () => {
+  const NOW = new Date("2026-10-10T15:00:00Z");
+  const hours = (h: number) => new Date(NOW.getTime() + h * 3_600_000);
+  /** Lead que entrou na etapa há `h` horas: o prazo gravado é a entrada + 8 h. */
+  const after = (h: number, stage: "FOLLOW_UP_1" | "FOLLOW_UP_2" | "FOLLOW_UP_3" = "FOLLOW_UP_1") =>
+    followUpAlert({ status: "ACTIVE", ownerId: "u1", stage, stageDueAt: hours(8 - h) }, NOW);
+
+  it("sem cor antes de 6 h", () => {
+    expect(after(0)).toBe("none");
+    expect(after(5.99)).toBe("none");
+  });
+
+  it("amarelo de 6 h até o fim do prazo", () => {
+    expect(after(6)).toBe("warning");
+    expect(after(7.99)).toBe("warning");
+    expect(after(8)).toBe("warning");
+  });
+
+  it("vermelho depois de 8 h, nos três follow-ups", () => {
+    expect(after(8.01)).toBe("overdue");
+    expect(after(8.01, "FOLLOW_UP_2")).toBe("overdue");
+    expect(after(8.01, "FOLLOW_UP_3")).toBe("overdue");
+    expect(after(6, "FOLLOW_UP_3")).toBe("warning");
+  });
+
+  it("negociação, lead sem responsável e Lixeira não mudam de cor", () => {
+    expect(followUpAlert({ status: "ACTIVE", ownerId: "u1", stage: "NEGOTIATION", stageDueAt: hours(-1) }, NOW)).toBe("none");
+    expect(followUpAlert({ status: "ACTIVE", ownerId: null, stage: "FOLLOW_UP_1", stageDueAt: hours(-1) }, NOW)).toBe("none");
+    expect(followUpAlert({ status: "TRASHED", ownerId: "u1", stage: "FOLLOW_UP_1", stageDueAt: hours(-1) }, NOW)).toBe("none");
   });
 });
 

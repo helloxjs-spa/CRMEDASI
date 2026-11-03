@@ -16,6 +16,7 @@ import type { ServiceContext } from "@/server/context";
 import { getMonthlyComparison, getSalesIndicators, type MonthlyComparisonRow } from "@/server/modules/dashboard/dashboard.service";
 import { getLeadIndicators, type LeadIndicators } from "@/server/modules/leads/leads.service";
 import { getRanking, type RankingResult, type SellerRankingEntry, type TeamRankingEntry } from "@/server/modules/ranking/ranking.service";
+import { GoalsCard } from "./goals-card";
 
 /**
  * Dashboard comercial (§17) da página inicial. Todos os números vêm dos
@@ -51,13 +52,15 @@ export async function CommercialDashboard({
   return (
     <div className="space-y-6">
       <PeriodFilter period={period} periodError={periodError} currentMonth={currentMonth} />
+      {/* Metas são mensais: num intervalo personalizado, o card mostra o mês atual. */}
+      <GoalsCard ctx={ctx} month={period.kind === "month" ? period.month : currentMonth} />
 
       <section aria-labelledby="dash-sales" className="space-y-3">
         <SectionTitle id="dash-sales">Vendas válidas — {periodLabel(period)}</SectionTitle>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <StatCard label="Vendas válidas" value={salesIndicators.salesCount} icon={Receipt} hint="Estornadas não contam" />
           <StatCard label="Faturamento" value={formatBRL(salesIndicators.revenueCents)} icon={Wallet} hint="Soma das vendas pela data da venda" />
-          <StatCard label="Comissão" value={formatBRL(salesIndicators.commissionCents)} icon={HandCoins} hint="R$ 100 por curso vendido" />
+          <StatCard label="Comissão" value={formatBRL(salesIndicators.commissionCents)} icon={HandCoins} hint="Soma da comissão de cada curso vendido" />
           {salesIndicators.finance && (
             <>
               <StatCard label="Custo das bolsas" value={formatBRL(salesIndicators.finance.costCents)} icon={Coins} />
@@ -87,29 +90,25 @@ function SectionTitle({ id, children }: { id: string; children: ReactNode }) {
 
 function PeriodFilter({ period, periodError, currentMonth }: { period: RankingPeriod; periodError?: string; currentMonth: string }) {
   return (
-    <Card className="space-y-3 p-4">
-      <form action="/" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Período do dashboard">
+    <Card className="w-fit max-w-full space-y-2 p-4">
+      <form action="/" className="flex flex-wrap items-end gap-2" aria-label="Período do dashboard">
         <Field label="Mês" htmlFor="dash-month">
-          <Input id="dash-month" name="mes" type="month" defaultValue={period.kind === "month" ? period.month : undefined} />
+          <Input id="dash-month" name="mes" type="month" className="w-44" defaultValue={period.kind === "month" ? period.month : undefined} />
         </Field>
-        <div className="grid grid-cols-2 gap-2 lg:col-span-2">
-          <Field label="De" htmlFor="dash-from">
-            <Input id="dash-from" name="de" type="date" defaultValue={period.kind === "custom" ? period.from : undefined} />
-          </Field>
-          <Field label="Até" htmlFor="dash-to">
-            <Input id="dash-to" name="ate" type="date" defaultValue={period.kind === "custom" ? period.to : undefined} />
-          </Field>
-        </div>
-        <div className="flex items-end gap-2">
-          <button type="submit" className={buttonClasses()}>
-            Aplicar
-          </button>
-          <Link href={`/?mes=${currentMonth}`} className="inline-flex h-10 items-center px-2 text-sm text-slate-600 hover:text-slate-900">
-            Mês atual
-          </Link>
-        </div>
+        <Field label="De" htmlFor="dash-from">
+          <Input id="dash-from" name="de" type="date" className="w-38" defaultValue={period.kind === "custom" ? period.from : undefined} />
+        </Field>
+        <Field label="Até" htmlFor="dash-to">
+          <Input id="dash-to" name="ate" type="date" className="w-38" defaultValue={period.kind === "custom" ? period.to : undefined} />
+        </Field>
+        <button type="submit" className={buttonClasses()}>
+          Aplicar
+        </button>
+        <Link href={`/?mes=${currentMonth}`} className="inline-flex h-10 items-center px-2 text-sm text-slate-600 hover:text-slate-900">
+          Mês atual
+        </Link>
       </form>
-      <p className="text-xs text-slate-500">Intervalo personalizado: preencha De e Até (o mês é ignorado). A carteira atual e os alertas não dependem do período.</p>
+      <p className="max-w-xl text-xs text-slate-500">Intervalo personalizado: preencha De e Até (o mês é ignorado). A carteira atual e os alertas não dependem do período.</p>
       {periodError && (
         <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-200">
           {periodError} Mostrando {periodLabel(period)}.

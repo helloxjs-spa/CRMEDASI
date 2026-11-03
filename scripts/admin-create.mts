@@ -142,7 +142,7 @@ try {
     console.error(`\n${error.message} Nada foi criado.`);
   } else {
     console.error(`\nFalha ao acessar o banco (código: ${errorCode(error)}). Nada foi criado.`);
-    console.error("Verifique a DATABASE_URL no .env (connection string do Supabase com ?sslmode=require).");
+    console.error("Verifique a DATABASE_URL no .env (connection string do Supabase com ?sslmode=verify-full&sslrootcert=certs/prod-ca-2021.crt).");
   }
 } finally {
   await handle.close().catch(() => {});

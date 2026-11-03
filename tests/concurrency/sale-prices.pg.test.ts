@@ -34,7 +34,7 @@ beforeAll(async () => {
   if (!REAL_PG_URL) return;
   db = await createRealPgDatabase();
   monitor = await db.client("crm-test-monitor");
-  await monitor.query(`INSERT INTO courses (id, name, institution_name) VALUES ($1, 'Pedagogia', 'Faculdade Teste')`, [COURSE]);
+  await monitor.query(`INSERT INTO courses (id, name, institution_name, commission_cents) VALUES ($1, 'Pedagogia', 'Faculdade Teste', 10000)`, [COURSE]);
   await monitor.query(`INSERT INTO course_costs (course_id, cost_cents) VALUES ($1, 40000)`, [COURSE]);
 }, 120_000);
 
@@ -124,7 +124,7 @@ describe.skipIf(!REAL_PG_URL)("migration 004 em PostgreSQL real", () => {
       const teamId = await insertTeam(c, supervisor);
       const seller = await insertUser(c, "SELLER", teamId);
       const course = randomUUID();
-      await c.query(`INSERT INTO courses (id, name, institution_name) VALUES ($1, 'Curso', 'Inst')`, [course]);
+      await c.query(`INSERT INTO courses (id, name, institution_name, commission_cents) VALUES ($1, 'Curso', 'Inst', 10000)`, [course]);
       await c.query(`INSERT INTO course_costs (course_id, cost_cents) VALUES ($1, 1000)`, [course]);
       const lead = randomUUID();
       const sale = randomUUID();

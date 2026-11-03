@@ -40,7 +40,7 @@ export default async function CoursesPage({ searchParams }: PageProps<"/cursos">
     <>
       <PageHeader
         title="Cursos"
-        description="Cursos oferecidos e custo da bolsa. O custo é visível somente para administradores."
+        description="Cursos oferecidos, custo da bolsa e comissão. O custo é visível somente para administradores."
         actions={<CreateCourseDialog />}
       />
 
@@ -79,6 +79,7 @@ export default async function CoursesPage({ searchParams }: PageProps<"/cursos">
                 <Th>Instituição</Th>
                 <Th>Status</Th>
                 <Th className="text-right">Custo da bolsa</Th>
+                <Th className="text-right">Comissão</Th>
                 <Th>Custo atualizado em</Th>
                 <Th>
                   <span className="sr-only">Ações</span>
@@ -92,6 +93,7 @@ export default async function CoursesPage({ searchParams }: PageProps<"/cursos">
                   <Td className={course.active ? undefined : "text-slate-400"}>{course.institutionName}</Td>
                   <Td>{course.active ? <Badge tone="success">Ativo</Badge> : <Badge>Inativo</Badge>}</Td>
                   <Td className="text-right tabular-nums">{formatBRL(course.scholarshipCostCents)}</Td>
+                  <Td className="text-right tabular-nums">{formatBRL(course.commissionCents)}</Td>
                   <Td className="tabular-nums text-slate-500">{formatDateTime(course.costUpdatedAt)}</Td>
                   <Td>
                     <div className="flex items-center justify-end gap-1">

@@ -26,10 +26,10 @@ beforeAll(async () => {
   handle = await createTestDatabase();
   org = await seedOrganization(handle);
   const admin = await org.ctx(org.ids.admin);
-  pedagogiaAlphaId = (await createCourse(admin, { name: "Pedagogia", institutionName: ALPHA, scholarshipCostCents: 300_00 })).id;
-  pedagogiaBetaId = (await createCourse(admin, { name: "Pedagogia", institutionName: BETA, scholarshipCostCents: 420_00 })).id;
-  historiaId = (await createCourse(admin, { name: "História", institutionName: ALPHA, scholarshipCostCents: 250_00 })).id;
-  const inactive = await createCourse(admin, { name: "Curso Antigo", institutionName: ALPHA, scholarshipCostCents: 99_00 });
+  pedagogiaAlphaId = (await createCourse(admin, { name: "Pedagogia", institutionName: ALPHA, commissionCents: 100_00, scholarshipCostCents: 300_00 })).id;
+  pedagogiaBetaId = (await createCourse(admin, { name: "Pedagogia", institutionName: BETA, commissionCents: 100_00, scholarshipCostCents: 420_00 })).id;
+  historiaId = (await createCourse(admin, { name: "História", institutionName: ALPHA, commissionCents: 100_00, scholarshipCostCents: 250_00 })).id;
+  const inactive = await createCourse(admin, { name: "Curso Antigo", institutionName: ALPHA, commissionCents: 100_00, scholarshipCostCents: 99_00 });
   await setCourseActive(admin, inactive.id, false);
 });
 afterAll(() => handle.close());
@@ -68,7 +68,7 @@ describe("custo da bolsa é exclusivo do ADMIN", () => {
 
     it(`${who}: não cria, edita, altera custo/instituição nem ativa/desativa`, async () => {
       const ctx = await org.ctx(org.ids[who]);
-      await expect(createCourse(ctx, { name: "Hack", institutionName: ALPHA, scholarshipCostCents: 1 })).rejects.toBeInstanceOf(
+      await expect(createCourse(ctx, { name: "Hack", institutionName: ALPHA, commissionCents: 100_00, scholarshipCostCents: 1 })).rejects.toBeInstanceOf(
         ForbiddenError,
       );
       await expect(updateCourse(ctx, pedagogiaAlphaId, { scholarshipCostCents: 1 })).rejects.toBeInstanceOf(ForbiddenError);
@@ -101,9 +101,9 @@ describe("mesmo curso em instituições diferentes", () => {
   it("o par curso + instituição é único (sem diferenciar maiúsculas nem espaços)", async () => {
     const admin = await org.ctx(org.ids.admin);
     await expect(
-      createCourse(admin, { name: "  PEDAGOGIA ", institutionName: "faculdade alpha", scholarshipCostCents: 1 }),
+      createCourse(admin, { name: "  PEDAGOGIA ", institutionName: "faculdade alpha", commissionCents: 100_00, scholarshipCostCents: 1 }),
     ).rejects.toBeInstanceOf(ConflictError);
-    const error = await createCourse(admin, { name: "pedagogia", institutionName: BETA, scholarshipCostCents: 1 }).catch((e: Error) => e);
+    const error = await createCourse(admin, { name: "pedagogia", institutionName: BETA, commissionCents: 100_00, scholarshipCostCents: 1 }).catch((e: Error) => e);
     expect((error as Error).message).toBe("Este curso já está cadastrado nesta instituição.");
   });
 
@@ -116,7 +116,7 @@ describe("mesmo curso em instituições diferentes", () => {
   it("instituição é obrigatória", async () => {
     const admin = await org.ctx(org.ids.admin);
     for (const institutionName of [undefined, "", "   ", "X"]) {
-      await expect(createCourse(admin, { name: "Direito", institutionName, scholarshipCostCents: 1 })).rejects.toBeInstanceOf(
+      await expect(createCourse(admin, { name: "Direito", institutionName, commissionCents: 100_00, scholarshipCostCents: 1 })).rejects.toBeInstanceOf(
         ValidationError,
       );
     }
@@ -183,7 +183,7 @@ describe("gestão pelo ADMIN", () => {
   it("valida custo: obrigatório, inteiro em centavos, não negativo", async () => {
     const admin = await org.ctx(org.ids.admin);
     for (const scholarshipCostCents of [undefined, -1, 10.5, "300"]) {
-      await expect(createCourse(admin, { name: "Curso X", institutionName: ALPHA, scholarshipCostCents })).rejects.toBeInstanceOf(
+      await expect(createCourse(admin, { name: "Curso X", institutionName: ALPHA, commissionCents: 100_00, scholarshipCostCents })).rejects.toBeInstanceOf(
         ValidationError,
       );
     }
@@ -192,7 +192,7 @@ describe("gestão pelo ADMIN", () => {
   it("rejeita campos não previstos (mass assignment)", async () => {
     const admin = await org.ctx(org.ids.admin);
     await expect(
-      createCourse(admin, { name: "Curso Y", institutionName: ALPHA, scholarshipCostCents: 1, active: false }),
+      createCourse(admin, { name: "Curso Y", institutionName: ALPHA, commissionCents: 100_00, scholarshipCostCents: 1, active: false }),
     ).rejects.toBeInstanceOf(ValidationError);
     await expect(updateCourse(admin, pedagogiaAlphaId, { id: historiaId })).rejects.toBeInstanceOf(ValidationError);
   });
@@ -218,5 +218,46 @@ describe("integridade no banco", () => {
 
   it("instituição em branco é recusada pelo banco", async () => {
     await expect(handle.db.update(courses).set({ institutionName: "  " }).where(eq(courses.id, pedagogiaAlphaId))).rejects.toThrow();
+  });
+});
+
+describe("comissão do curso", () => {
+  const base = { institutionName: ALPHA, scholarshipCostCents: 100_00 };
+
+  it("é obrigatória no cadastro e não aceita valor inválido", async () => {
+    const admin = await org.ctx(org.ids.admin);
+    for (const commissionCents of [undefined, -1, 10.5, "100"]) {
+      const error = await createCourse(admin, { ...base, name: "Sem Comissão", commissionCents }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).fieldErrors.commissionCents).toBeDefined();
+    }
+  });
+
+  it("cada curso tem a sua, e zero é permitido", async () => {
+    const admin = await org.ctx(org.ids.admin);
+    const a = await createCourse(admin, { ...base, name: "Comissão Alta", commissionCents: 350_00 });
+    const b = await createCourse(admin, { ...base, name: "Comissão Zero", commissionCents: 0 });
+    expect(a.commissionCents).toBe(350_00);
+    expect(b.commissionCents).toBe(0);
+  });
+
+  it("alterar audita de/para; sem mudança não audita", async () => {
+    const admin = await org.ctx(org.ids.admin);
+    const { id } = await createCourse(admin, { ...base, name: "Comissão Auditada", commissionCents: 100_00 });
+    const audited = async () =>
+      (await handle.db.select().from(auditEvents).where(and(eq(auditEvents.entityId, id), eq(auditEvents.action, "course.commission_changed")))).map((e) => e.metadata);
+
+    await updateCourse(admin, id, { commissionCents: 100_00 });
+    expect(await audited()).toEqual([]);
+
+    const updated = await updateCourse(admin, id, { commissionCents: 180_00 });
+    expect(updated.commissionCents).toBe(180_00);
+    expect(await audited()).toEqual([{ name: "Comissão Auditada", institutionName: ALPHA, fromCents: 100_00, toCents: 180_00 }]);
+  });
+
+  it("supervisor e vendedor não alteram", async () => {
+    for (const who of ["sellerA1", "supA"] as const) {
+      await expect(updateCourse(await org.ctx(org.ids[who]), pedagogiaAlphaId, { commissionCents: 1 })).rejects.toBeInstanceOf(ForbiddenError);
+    }
   });
 });

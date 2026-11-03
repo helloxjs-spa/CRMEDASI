@@ -33,7 +33,7 @@ beforeAll(async () => {
   db = await createRealPgDatabase();
   monitor = await db.client("crm-test-monitor");
   for (const [id, name] of [[COURSE, "Pedagogia"], [COURSE2, "Administração"]]) {
-    await monitor.query(`INSERT INTO courses (id, name, institution_name) VALUES ($1, $2, 'Faculdade Teste')`, [id, name]);
+    await monitor.query(`INSERT INTO courses (id, name, institution_name, commission_cents) VALUES ($1, $2, 'Faculdade Teste', 10000)`, [id, name]);
     await monitor.query(`INSERT INTO course_costs (course_id, cost_cents) VALUES ($1, 40000)`, [id]);
   }
 }, 120_000);

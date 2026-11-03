@@ -6,3 +6,4 @@ export * from "./leads";
 export * from "./sales";
 export * from "./certificates";
 export * from "./installments";
+export * from "./goals";

@@ -26,7 +26,7 @@
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      "id": "COLE_AQUI_O_ID_DO_HYPERDRIVE",
+      "id": "c6f4fc059fdc4feca3aaf122d274614d",
       // Endereço local FICTÍCIO, sem senha: `opennextjs-cloudflare deploy` (também
       // chamado por `wrangler deploy`) monta um proxy local dos bindings e falha sem
       // ele no Workers Builds. Não é usado em produção nem é conectado no deploy.

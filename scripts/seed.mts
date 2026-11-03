@@ -36,17 +36,17 @@ const TEAMS = ["Equipe Alfa", "Equipe Beta", "Equipe Gama", "Equipe Delta"];
 const SUPERVISORS = ["Ana Souza", "Bruno Lima", "Carla Mendes", "Diego Rocha"];
 const FIRST_NAMES = ["Lucas", "Mariana", "Pedro", "Juliana", "Rafael", "Camila", "Thiago", "Fernanda", "Gabriel", "Larissa"];
 const LAST_NAMES = ["Alves", "Barbosa", "Costa", "Dias", "Ferreira", "Gomes", "Martins", "Nunes"];
-// [curso, instituição, custo da bolsa em centavos, ativo]
-const COURSES: [string, string, number, boolean][] = [
-  ["Administração", "Faculdade Alpha", 280_00, true],
-  ["Ciências Contábeis", "Faculdade Alpha", 260_00, true],
-  ["Direito", "Universidade Gama", 450_00, true],
-  ["Enfermagem", "Universidade Gama", 390_00, true],
-  ["Pedagogia", "Faculdade Alpha", 300_00, true],
-  ["Pedagogia", "Faculdade Beta", 420_00, true],
-  ["Psicologia", "Faculdade Beta", 420_00, true],
-  ["Gestão de Recursos Humanos", "Faculdade Beta", 220_00, true],
-  ["Letras", "Faculdade Alpha", 180_00, false],
+// [curso, instituição, custo da bolsa em centavos, ativo, comissão em centavos]
+const COURSES: [string, string, number, boolean, number][] = [
+  ["Administração", "Faculdade Alpha", 280_00, true, 100_00],
+  ["Ciências Contábeis", "Faculdade Alpha", 260_00, true, 100_00],
+  ["Direito", "Universidade Gama", 450_00, true, 200_00],
+  ["Enfermagem", "Universidade Gama", 390_00, true, 150_00],
+  ["Pedagogia", "Faculdade Alpha", 300_00, true, 100_00],
+  ["Pedagogia", "Faculdade Beta", 420_00, true, 120_00],
+  ["Psicologia", "Faculdade Beta", 420_00, true, 150_00],
+  ["Gestão de Recursos Humanos", "Faculdade Beta", 220_00, true, 80_00],
+  ["Letras", "Faculdade Alpha", 180_00, false, 80_00],
 ];
 
 const slug = (s: string) =>
@@ -93,8 +93,8 @@ if (hasCourses) {
   console.log("Cursos: já existem cursos; bloco ignorado.");
 } else {
   await db.transaction(async (tx) => {
-    for (const [name, institutionName, costCents, active] of COURSES) {
-      const [course] = await tx.insert(courses).values({ name, institutionName, active }).returning({ id: courses.id });
+    for (const [name, institutionName, costCents, active, commissionCents] of COURSES) {
+      const [course] = await tx.insert(courses).values({ name, institutionName, active, commissionCents }).returning({ id: courses.id });
       await tx.insert(courseCosts).values({ courseId: course.id, costCents });
     }
   });

@@ -236,6 +236,9 @@ function businessToday(now: Date = new Date()): string {
 // Registro
 // ---------------------------------------------------------------------------
 
+/** Valores vigentes do curso, copiados em cada item vendido. */
+type CourseSnapshot = { costCents: number; commissionCents: number };
+
 /**
  * Registra uma venda para um lead ATIVO, em qualquer etapa (inclusive com
  * Follow-up 3 ou negociação vencidos — C37), numa única transação READ
@@ -246,8 +249,8 @@ function businessToday(now: Date = new Date()): string {
  *   2. revalida, com tudo travado: ator ativo e no escopo, lead ativo,
  *      vendedor SELLER ativo, com equipe ATIVA e permitido para o ator;
  *   3. cursos e custos de bolsa (FOR SHARE, a mesma ordem do trigger de itens):
- *      todos ativos e com custo; snapshot de custo e comissão vêm daqui e de
- *      business-rules.ts, nunca do formulário;
+ *      todos ativos e com custo; snapshot de custo e comissão vêm daqui
+ *      (valores vigentes do curso), nunca do formulário;
  *   4. venda → itens → lead (Fechamento, responsável = vendedor, SALE_CREATED)
  *      → sale_events CREATED por último (o banco calcula o metadata e confere
  *      tudo no COMMIT).
@@ -294,7 +297,7 @@ export async function createSale(ctx: ServiceContext, input: unknown): Promise<C
 
       if (lead.status !== "ACTIVE") throw new ValidationError(LEAD_IN_TRASH);
       const seller = await loadSaleSeller(tx, actor, sellerId);
-      const costs = await lockCourseCosts(tx, data.items.map((item) => item.courseId));
+      const snapshots = await lockCourseSnapshots(tx, data.items.map((item) => item.courseId));
       const totalCents = sumPrices(data.items);
 
       await tx.insert(sales).values({
@@ -314,8 +317,8 @@ export async function createSale(ctx: ServiceContext, input: unknown): Promise<C
           saleId: data.requestId,
           courseId: item.courseId,
           priceCents: item.priceCents,
-          costSnapshotCents: costs.get(item.courseId)!,
-          commissionSnapshotCents: BUSINESS_RULES.commissionPerItemCents,
+          costSnapshotCents: snapshots.get(item.courseId)!.costCents,
+          commissionSnapshotCents: snapshots.get(item.courseId)!.commissionCents,
           addedBy: actor.userId,
         })),
       );
@@ -424,12 +427,14 @@ async function loadSaleSeller(
  * Cursos (FOR SHARE) e depois custos (FOR SHARE), em ordem de id — a mesma
  * ordem do trigger de itens do 003, então uma alteração de custo concorrente
  * espera esta venda (ou termina antes e o snapshot já usa o valor novo).
- * Devolve o custo vigente de cada curso. Uso interno: nunca sai do serviço.
+ * O mesmo vale para a comissão, lida da linha travada do curso.
+ * Devolve custo e comissão vigentes de cada curso. Uso interno: o custo nunca
+ * sai do serviço.
  */
-async function lockCourseCosts(db: Database, courseIds: string[]): Promise<Map<string, number>> {
+async function lockCourseSnapshots(db: Database, courseIds: string[]): Promise<Map<string, CourseSnapshot>> {
   const ids = [...new Set(courseIds)];
   const found = await db
-    .select({ id: courses.id, name: courses.name, active: courses.active })
+    .select({ id: courses.id, name: courses.name, active: courses.active, commissionCents: courses.commissionCents })
     .from(courses)
     .where(inArray(courses.id, ids))
     .orderBy(asc(courses.id))
@@ -449,7 +454,7 @@ async function lockCourseCosts(db: Database, courseIds: string[]): Promise<Map<s
     const message = `Curso sem custo de bolsa cadastrado: ${withoutCost.join(", ")}. Peça ao administrador para cadastrá-lo.`;
     throw new ValidationError(message, { items: [message] });
   }
-  return byCourse;
+  return new Map(found.map((c) => [c.id, { costCents: byCourse.get(c.id)!, commissionCents: c.commissionCents }]));
 }
 
 // ---------------------------------------------------------------------------
@@ -645,7 +650,7 @@ export async function updateSale(ctx: ServiceContext, rawId: unknown, input: unk
     if (currentItems.length - removeIds.length + toAdd.length < 1) throw new ValidationError(SALE_NEEDS_ITEM, { items: [SALE_NEEDS_ITEM] });
     // Correção para o mesmo preço não é mudança.
     const reprices = repriceRequests.filter((r) => r.priceCents !== currentPrice.get(r.itemId));
-    const costs = toAdd.length > 0 ? await lockCourseCosts(tx, toAdd.map((item) => item.courseId)) : new Map<string, number>();
+    const snapshots = toAdd.length > 0 ? await lockCourseSnapshots(tx, toAdd.map((item) => item.courseId)) : new Map<string, CourseSnapshot>();
     const removed = new Set(removeIds);
     const repriced = new Map(reprices.map((r) => [r.itemId, r.priceCents]));
     const newTotal = sumPrices([
@@ -682,8 +687,8 @@ export async function updateSale(ctx: ServiceContext, rawId: unknown, input: unk
           saleId: id,
           courseId: item.courseId,
           priceCents: item.priceCents,
-          costSnapshotCents: costs.get(item.courseId)!,
-          commissionSnapshotCents: BUSINESS_RULES.commissionPerItemCents,
+          costSnapshotCents: snapshots.get(item.courseId)!.costCents,
+          commissionSnapshotCents: snapshots.get(item.courseId)!.commissionCents,
           addedBy: actor.userId,
         })),
       );

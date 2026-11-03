@@ -16,7 +16,7 @@ export function EdasiMark({ className, decorative = true }: { className: string;
   return <Image src={mark} alt={decorative ? "" : "Grupo EDASI"} unoptimized className={cn("select-none", className)} />;
 }
 
-/** Logo completo: "GRUPO EDASI" + "Educação, Segurança e Inovação em Saúde". */
+/** Logo "GRUPO EDASI", sem o slogan (que entra como texto onde for usado). */
 export function EdasiLogo({ className, priority }: { className?: string; priority?: boolean }) {
   return <Image src={logo} alt="Grupo EDASI" unoptimized priority={priority} className={cn("h-auto w-full select-none", className)} />;
 }
@@ -25,7 +25,8 @@ export function EdasiLogo({ className, priority }: { className?: string; priorit
 export function EdasiWordmark({ className, tone = "light" }: { className?: string; tone?: "light" | "dark" }) {
   return (
     <span className={cn("block font-display leading-none", tone === "light" ? "text-white" : "text-brand-800", className)}>
-      <span className="block text-[0.42em] font-semibold tracking-[0.5em]">GRUPO</span>
+      {/* -mr compensa o espaçamento após a última letra, para "GRUPO" centralizar com "EDASI". */}
+      <span className="-mr-[0.5em] block text-[0.42em] font-semibold tracking-[0.5em]">GRUPO</span>
       <span className="mt-1 block font-extrabold tracking-[0.02em]">EDASI</span>
     </span>
   );
