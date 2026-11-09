@@ -9,7 +9,21 @@ export type SalePageSize = (typeof SALE_PAGE_SIZES)[number];
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   PIX: "Pix (à vista)",
   CARD: "Cartão",
+  BOLETO: "Boleto parcelado",
 };
+
+/** Formas de pagamento com cronograma de parcelas (C52): cartão e boleto parcelado. Pix é à vista. */
+export function hasInstallments(method: PaymentMethod | ""): method is Exclude<PaymentMethod, "PIX"> {
+  return method === "CARD" || method === "BOLETO";
+}
+
+/** Mensagem de parcelas obrigatórias, por forma de pagamento. */
+export function installmentsRequiredMessage(method: Exclude<PaymentMethod, "PIX">): string {
+  return method === "BOLETO" ? "Informe a quantidade de parcelas do boleto." : "Informe a quantidade de parcelas do cartão.";
+}
+
+/** Venda estornada: o vendedor não altera nada (nem o comprovante). */
+export const SALE_REVERSED_READ_ONLY = "Venda estornada é somente leitura para o vendedor.";
 
 export const SALE_STATUS_LABELS: Record<SaleStatus, string> = {
   ACTIVE: "Válida",
@@ -44,9 +58,11 @@ export function saleStatusAlert(state: ActionState): "conflict" | "uncertain" | 
   return null;
 }
 
-/** Forma de pagamento por extenso, com parcelas no cartão. */
+/** Forma de pagamento por extenso, com parcelas no cartão e no boleto. */
 export function paymentLabel(method: PaymentMethod, installments: number | null): string {
-  return method === "CARD" ? `Cartão em ${installments ?? "?"}x` : PAYMENT_METHOD_LABELS.PIX;
+  if (method === "CARD") return `Cartão em ${installments ?? "?"}x`;
+  if (method === "BOLETO") return `Boleto em ${installments ?? "?"}x`;
+  return PAYMENT_METHOD_LABELS.PIX;
 }
 
 /** Data comercial "AAAA-MM-DD" → "DD/MM/AAAA" (sem passar por fuso horário). */

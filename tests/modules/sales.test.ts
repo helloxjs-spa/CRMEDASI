@@ -116,6 +116,7 @@ describe("registro de venda", () => {
     await expectValidation(createSale(seller, saleInput(leadId, course, { paymentMethod: "CARD" })), "Informe a quantidade de parcelas do cartão.");
     await expectValidation(createSale(seller, saleInput(leadId, course, { installmentCount: 3 })), "Pix é à vista: não informe parcelas.");
     await expectValidation(createSale(seller, saleInput(leadId, course, { paymentMethod: "CARD", installmentCount: 0 })), "Informe ao menos 1 parcela.");
+    await expectValidation(createSale(seller, saleInput(leadId, course, { paymentMethod: "BOLETO" })), "Informe a quantidade de parcelas do boleto.");
 
     const { saleId } = await createSale(seller, saleInput(leadId, course, { paymentMethod: "CARD", installmentCount: 48 }));
     expect(await saleRow(saleId)).toMatchObject({ paymentMethod: "CARD", installmentCount: 48 });

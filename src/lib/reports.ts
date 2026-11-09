@@ -11,7 +11,7 @@ export const REPORT_LABELS: Record<ReportType, { title: string; description: str
   items: { title: "Itens vendidos", description: "Uma linha por curso vendido (itens atuais), com preço e comissão.", period: "Data da venda" },
   commissions: { title: "Comissões", description: "Comissão por vendedor: soma das comissões dos cursos das vendas válidas.", period: "Data da venda" },
   performance: { title: "Desempenho", description: "Ranking de vendedores ou equipes: vendas válidas e faturamento.", period: "Data da venda" },
-  installments: { title: "Parcelas", description: "Parcelas do cartão (cronograma atual), com situação e pagamento.", period: "Vencimento" },
+  installments: { title: "Parcelas", description: "Parcelas do cartão e do boleto (cronograma atual), com situação e pagamento.", period: "Vencimento" },
   certificates: { title: "Certificados", description: "Certificados registrados, com conclusão, entrega e certificadora.", period: "Conclusão ou entrega" },
 };
 

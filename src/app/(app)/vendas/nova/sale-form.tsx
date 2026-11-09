@@ -21,9 +21,18 @@ import { previewTotalCents, REQUEST_ID_REUSED, SALE_CREATE_UNCERTAIN } from "@/l
 import { settleAction } from "@/lib/settle-action";
 import type { PaymentMethod } from "@/server/db/schema";
 import { createSaleAction } from "../actions";
-import { CourseRows, OtherErrors, PaymentFields, TotalPreview, type CourseChoice, type CourseRow, type SellerChoice } from "../sale-form-parts";
+import {
+  CourseRows,
+  OtherErrors,
+  PaymentFields,
+  ReceiptField,
+  TotalPreview,
+  type CourseChoice,
+  type CourseRow,
+  type SellerChoice,
+} from "../sale-form-parts";
 
-const INLINE_ERRORS = /^(sellerId|saleDate|paymentMethod|installmentCount|items\.\d+\.(courseId|priceCents))$/;
+const INLINE_ERRORS = /^(sellerId|saleDate|paymentMethod|installmentCount|receipt(\..+)?|items\.\d+\.(courseId|priceCents))$/;
 
 type SaleFormProps = {
   requestId: string;
@@ -83,6 +92,8 @@ function DraftedSaleForm(props: SaleFormProps & { fresh: boolean; onStartNew: ()
   // Controlados: o React limpa campos não controlados a cada envio do form.
   const [sellerId, setSellerId] = useState(fields.sellerId);
   const [saleDate, setSaleDate] = useState(fields.saleDate);
+  // Comprovante opcional: fica só na memória desta tela (não vai para o rascunho).
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
   // Já houve envio desta tentativa sem confirmação de sucesso.
   const [submitted, setSubmitted] = useState(boot.draft.submitted);
   // O rascunho está guardado nesta aba? (falso: armazenamento indisponível)
@@ -104,6 +115,7 @@ function DraftedSaleForm(props: SaleFormProps & { fresh: boolean; onStartNew: ()
     const storage = sessionDraftStorage();
     setSubmitted(true);
     setSaved(!!storage && writeSaleDraft(storage, draftOf(true)));
+    if (receiptFile) formData.set("receipt", receiptFile);
     const result = await settleAction(createSaleAction, prev, formData, SALE_CREATE_UNCERTAIN);
     // Só o sucesso confirmado encerra a tentativa. Erro, conflito ou resposta
     // perdida mantêm o mesmo requestId para um reenvio seguro.
@@ -156,7 +168,8 @@ function DraftedSaleForm(props: SaleFormProps & { fresh: boolean; onStartNew: ()
         <Notice>
           {boot.draft.submitted
             ? "Esta aba tem uma tentativa de registro desta venda já enviada, sem confirmação do resultado. Os dados e a identificação da tentativa foram mantidos: enviar de novo sem alterar nada não duplica a venda. Se for alterar os dados, confira antes as vendas do lead."
-            : "Rascunho desta venda recuperado nesta aba."}
+            : "Rascunho desta venda recuperado nesta aba."}{" "}
+          O comprovante de pagamento não fica no rascunho: se houver, escolha o arquivo de novo.
         </Notice>
       )}
       {reused || uncertain ? <Notice role="alert">{state.message}</Notice> : <FormAlert message={state.status === "error" ? state.message : undefined} />}
@@ -217,6 +230,14 @@ function DraftedSaleForm(props: SaleFormProps & { fresh: boolean; onStartNew: ()
         onInstallmentsChange={setInstallments}
         errors={errors}
         idPrefix="new-sale"
+      />
+
+      <ReceiptField
+        file={receiptFile}
+        onChange={setReceiptFile}
+        errors={[...new Set(Object.entries(errors).flatMap(([key, list]) => (/^receipt(\.|$)/.test(key) ? list : [])))]}
+        idPrefix="new-sale"
+        disabled={pending || done}
       />
 
       <div className="grid gap-3 sm:grid-cols-2">

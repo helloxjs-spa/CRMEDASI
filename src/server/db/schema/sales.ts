@@ -18,7 +18,8 @@ import { teams, users } from "./organization";
 export const SALE_STATUSES = ["ACTIVE", "REVERSED"] as const;
 export type SaleStatus = (typeof SALE_STATUSES)[number];
 
-export const PAYMENT_METHODS = ["PIX", "CARD"] as const;
+/** PIX é à vista; CARD e BOLETO (boleto parcelado, 011) têm parcelas. */
+export const PAYMENT_METHODS = ["PIX", "CARD", "BOLETO"] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 export const SALE_EVENT_TYPES = ["CREATED", "UPDATED", "REVERSED", "REACTIVATED"] as const;
@@ -77,7 +78,7 @@ export const sales = pgTable(
     check(
       "sales_installments_consistent",
       sql`(${t.paymentMethod} = 'PIX' AND ${t.installmentCount} IS NULL)
-        OR (${t.paymentMethod} = 'CARD' AND ${t.installmentCount} IS NOT NULL AND ${t.installmentCount} >= 1)`,
+        OR (${t.paymentMethod} <> 'PIX' AND ${t.installmentCount} IS NOT NULL AND ${t.installmentCount} >= 1)`,
     ),
   ],
 );

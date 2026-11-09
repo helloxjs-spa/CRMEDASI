@@ -4,7 +4,7 @@ import { users } from "./organization";
 import { sales } from "./sales";
 
 /**
- * Parcelas do cartão (Documento Mestre §12; C52). Espelha database/migrations/
+ * Parcelas do cartão e do boleto (Documento Mestre §12; C52). Espelha database/migrations/
  * 006_installments.sql, que é a fonte do schema. Ficam SÓ no SQL os triggers:
  * transições de situação, imutabilidade, carimbos de tempo, sem DELETE e a
  * conferência do cronograma atual de cada venda no COMMIT.

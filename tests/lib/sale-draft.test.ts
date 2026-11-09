@@ -94,7 +94,7 @@ describe("rascunho da venda (sessionStorage da aba)", () => {
       JSON.stringify({ ...filledDraft(), requestId: "não-é-uuid" }),
       JSON.stringify({ ...filledDraft(), version: 2 }),
       JSON.stringify({ ...filledDraft(), fields: { ...filledDraft().fields, items: [] } }),
-      JSON.stringify({ ...filledDraft(), fields: { ...filledDraft().fields, paymentMethod: "BOLETO" } }),
+      JSON.stringify({ ...filledDraft(), fields: { ...filledDraft().fields, paymentMethod: "CHEQUE" } }),
       JSON.stringify({ ...filledDraft(), submitted: "sim" }),
     ]) {
       storage.setItem(key, raw);

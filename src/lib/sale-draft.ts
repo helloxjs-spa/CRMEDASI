@@ -1,4 +1,5 @@
 import type { PaymentMethod } from "@/server/db/schema";
+import { hasInstallments } from "./sales";
 
 /**
  * Rascunho da venda em registro, guardado no `sessionStorage` da aba: um F5
@@ -13,7 +14,7 @@ export const SALE_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 
 const MAX_ROWS = 100;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const PAYMENT_VALUES = ["", "PIX", "CARD"] as const;
+const PAYMENT_VALUES = ["", "PIX", "CARD", "BOLETO"] as const;
 
 export type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
@@ -147,7 +148,7 @@ export function restoreSaleDraftFields(
   return {
     items: fields.items.map((item) => ({ courseId: options.courseIds.includes(item.courseId) ? item.courseId : "", price: item.price })),
     paymentMethod: fields.paymentMethod,
-    installmentCount: fields.paymentMethod === "CARD" ? fields.installmentCount : "",
+    installmentCount: hasInstallments(fields.paymentMethod) ? fields.installmentCount : "",
     sellerId: options.sellerIds.includes(fields.sellerId) ? fields.sellerId : options.defaultSellerId,
     saleDate: options.canSetDate ? fields.saleDate : "",
   };

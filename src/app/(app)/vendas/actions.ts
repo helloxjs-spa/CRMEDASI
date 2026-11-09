@@ -5,6 +5,7 @@ import type { ActionState } from "@/lib/action-state";
 import { parseBRLToCents } from "@/lib/money";
 import type { ServiceContext } from "@/server/context";
 import { NotFoundError } from "@/server/errors";
+import { removeSaleReceipt, replaceSaleReceipt } from "@/server/modules/sales/sale-receipts.service";
 import { createSale, getSale, reactivateSale, reverseSale, updateSale } from "@/server/modules/sales/sales.service";
 import { runAction, text } from "@/server/next/action";
 
@@ -42,6 +43,19 @@ function pricedRows(formData: FormData, idField: string, priceField: string): [s
   return Array.from({ length: Math.max(ids.length, prices.length) }, (_, i) => [ids[i] ?? "", parseBRLToCents(prices[i] ?? "")]);
 }
 
+/**
+ * Comprovante opcional: arquivo escolhido → { nome, bytes } para o serviço
+ * (que confere tamanho e tipo real). Campo ausente ou sem arquivo → undefined;
+ * qualquer outra coisa (ex.: texto forjado) vai como está e o serviço recusa.
+ */
+async function receipt(formData: FormData): Promise<unknown> {
+  const value = formData.get("receipt");
+  if (value === null || value === "") return undefined;
+  if (!(value instanceof File)) return value;
+  if (value.size === 0 && !value.name) return undefined;
+  return { fileName: value.name, bytes: new Uint8Array(await value.arrayBuffer()) };
+}
+
 /** A venda está no acesso do ator? (ex.: SELLER que atribuiu a venda a um colega não a vê.) */
 async function isVisible(ctx: ServiceContext, saleId: string): Promise<boolean> {
   try {
@@ -63,6 +77,7 @@ export async function createSaleAction(_prev: ActionState, formData: FormData): 
       paymentMethod: text(formData, "paymentMethod"),
       installmentCount: integer(formData, "installmentCount"),
       items: pricedRows(formData, "itemCourseId", "itemPrice").map(([courseId, priceCents]) => ({ courseId, priceCents })),
+      receipt: await receipt(formData),
     });
     revalidateSaleViews();
     // Fora do acesso (inclusive num reenvio): só uma confirmação genérica,
@@ -108,6 +123,30 @@ export async function updateSaleAction(_prev: ActionState, formData: FormData): 
       message: result.changed ? "Venda atualizada." : "Nenhuma alteração para salvar.",
       redirectTo: `/vendas/${result.saleId}`,
     };
+  });
+}
+
+/** Anexar (venda sem comprovante) ou trocar o comprovante, na edição da venda. */
+export async function replaceSaleReceiptAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return runAction(async (ctx) => {
+    const saleId = text(formData, "saleId");
+    const { replaced } = await replaceSaleReceipt(ctx, {
+      saleId,
+      expectedReceiptId: text(formData, "expectedReceiptId"),
+      // Sem arquivo: o serviço recusa ("Comprovante inválido.").
+      receipt: (await receipt(formData)) ?? null,
+    });
+    revalidateSaleViews();
+    return { message: replaced ? "Comprovante trocado. O arquivo anterior foi apagado." : "Comprovante anexado." };
+  });
+}
+
+/** Remover o comprovante atual (o arquivo é apagado; o registro fica no histórico). */
+export async function removeSaleReceiptAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return runAction(async (ctx) => {
+    await removeSaleReceipt(ctx, { saleId: text(formData, "saleId"), expectedReceiptId: text(formData, "expectedReceiptId") });
+    revalidateSaleViews();
+    return { message: "Comprovante removido." };
   });
 }
 

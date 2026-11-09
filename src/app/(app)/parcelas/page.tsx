@@ -34,7 +34,7 @@ import {
 export const metadata: Metadata = { title: "Parcelas" };
 
 /**
- * Parcelas do cartão (§12; C52). Filtros e página na URL; a consulta passa por
+ * Parcelas do cartão e do boleto (§12; C52). Filtros e página na URL; a consulta passa por
  * listInstallments (RBAC + escopo C50 + paginação no banco), só o cronograma
  * atual de cada venda. O pagamento é registrado aqui ou no detalhe da venda.
  */
@@ -50,10 +50,10 @@ export default async function InstallmentsPage({ searchParams }: PageProps<"/par
         title="Parcelas"
         description={
           ctx.actor.role === "SELLER"
-            ? "Parcelas das vendas no cartão em que você é o responsável."
+            ? "Parcelas das vendas no cartão ou no boleto em que você é o responsável."
             : ctx.actor.role === "SUPERVISOR"
               ? "Parcelas das vendas no cartão dos vendedores da sua equipe."
-              : "Parcelas de todas as vendas no cartão."
+              : "Parcelas de todas as vendas no cartão ou no boleto."
         }
       />
 
@@ -125,7 +125,7 @@ async function InstallmentsResults({ ctx, params, showSeller }: { ctx: ServiceCo
             description={
               hasInstallmentFilters(params)
                 ? "Ajuste a busca, a situação ou o período para ver outras parcelas."
-                : "As parcelas são geradas ao registrar uma venda no cartão. Pix é à vista e não tem parcelas."
+                : "As parcelas são geradas ao registrar uma venda no cartão ou no boleto parcelado. Pix é à vista e não tem parcelas."
             }
           />
         </Card>

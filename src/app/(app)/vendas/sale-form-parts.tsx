@@ -1,13 +1,14 @@
 "use client";
 
-import { Plus, Trash2 } from "lucide-react";
+import { Paperclip, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
 import { MAX_INSTALLMENTS } from "@/lib/installments";
 import { courseLabel } from "@/lib/leads";
 import { centsToInput, formatBRL, parseBRLToCents } from "@/lib/money";
-import { PAYMENT_METHOD_LABELS } from "@/lib/sales";
+import { formatFileSize, RECEIPT_ACCEPT, receiptFileError } from "@/lib/receipts";
+import { hasInstallments, PAYMENT_METHOD_LABELS } from "@/lib/sales";
 import type { PaymentMethod } from "@/server/db/schema";
 
 export type CourseChoice = { id: string; name: string; institutionName: string };
@@ -124,7 +125,7 @@ export function CourseRows({
   );
 }
 
-/** Pix (à vista) ou Cartão com parcelas. Pix não envia parcelas. */
+/** Pix (à vista), Cartão ou Boleto parcelado (com parcelas). Pix não envia parcelas. */
 export function PaymentFields({
   method,
   onMethodChange,
@@ -141,7 +142,7 @@ export function PaymentFields({
   onInstallmentsChange: (value: string) => void;
   errors: Record<string, string[]>;
   idPrefix: string;
-  /** Edição: ao trocar para Pix, envia parcelas vazias (= remover as parcelas do cartão). */
+  /** Edição: ao trocar para Pix, envia parcelas vazias (= remover as parcelas do cartão/boleto). */
   sendEmptyInstallments?: boolean;
   /** Só conveniência (o servidor valida). Na edição, não menor que a quantidade atual. */
   maxInstallments?: number;
@@ -150,11 +151,11 @@ export function PaymentFields({
     <div className="grid gap-3 sm:grid-cols-2">
       <fieldset className="space-y-1.5">
         <legend className="text-sm font-medium text-slate-700">Forma de pagamento</legend>
-        <div className="flex gap-2">
-          {(["PIX", "CARD"] as const).map((value) => (
+        <div className="flex flex-wrap gap-2">
+          {(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]).map((value) => (
             <label
               key={value}
-              className="flex h-10 flex-1 cursor-pointer items-center gap-2 rounded-lg px-3 text-sm ring-1 ring-slate-300 has-checked:bg-brand-50 has-checked:ring-2 has-checked:ring-brand-600"
+              className="flex h-10 flex-1 cursor-pointer whitespace-nowrap items-center gap-2 rounded-lg px-3 text-sm ring-1 ring-slate-300 has-checked:bg-brand-50 has-checked:ring-2 has-checked:ring-brand-600"
             >
               <input
                 type="radio"
@@ -175,7 +176,7 @@ export function PaymentFields({
           </p>
         ))}
       </fieldset>
-      {method === "CARD" ? (
+      {hasInstallments(method) ? (
         <Field label="Parcelas" htmlFor={`${idPrefix}-installments`} errors={errors.installmentCount}>
           <Input
             id={`${idPrefix}-installments`}
@@ -210,6 +211,75 @@ export function TotalPreview({ totalCents, label = "Total da venda" }: { totalCe
 }
 
 /** Mensagens de erro do servidor que não têm campo próprio na tela. */
+/**
+ * Comprovante de pagamento opcional (PDF, JPG ou PNG, até 5 MB). O arquivo
+ * escolhido fica no estado do formulário, que o anexa ao enviar (campo
+ * `receipt`): o React limpa campos de arquivo a cada envio, e assim um erro do
+ * servidor não obriga a escolher o arquivo de novo. A conferência aqui é só
+ * conveniência; o servidor valida o conteúdo.
+ */
+export function ReceiptField({
+  file,
+  onChange,
+  errors,
+  idPrefix,
+  disabled,
+  label = "Comprovante de pagamento (opcional)",
+}: {
+  file: File | null;
+  onChange: (file: File | null) => void;
+  errors?: string[];
+  idPrefix: string;
+  disabled?: boolean;
+  label?: string;
+}) {
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [inputKey, setInputKey] = useState(0);
+  const id = `${idPrefix}-receipt`;
+  const shown = localError ? [localError] : errors;
+  return (
+    <Field label={label} htmlFor={id} errors={shown} hint="PDF, JPG ou PNG, até 5 MB.">
+      {file ? (
+        <div className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm ring-1 ring-slate-300">
+          <Paperclip className="size-4 shrink-0 text-slate-500" aria-hidden />
+          <span id={id} className="min-w-0 flex-1 truncate" title={file.name}>
+            {file.name}
+          </span>
+          <span className="shrink-0 text-xs text-slate-500">{formatFileSize(file.size)}</span>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={disabled}
+            onClick={() => {
+              onChange(null);
+              setInputKey((k) => k + 1);
+            }}
+          >
+            Remover
+          </Button>
+        </div>
+      ) : (
+        <Input
+          key={inputKey}
+          id={id}
+          type="file"
+          accept={RECEIPT_ACCEPT}
+          disabled={disabled}
+          className="py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1 file:text-sm file:font-medium file:text-slate-700"
+          aria-invalid={shown?.length ? true : undefined}
+          onChange={(e) => {
+            const chosen = e.target.files?.[0] ?? null;
+            const error = chosen ? receiptFileError(chosen) : null;
+            setLocalError(error);
+            if (error) e.target.value = "";
+            onChange(error ? null : chosen);
+          }}
+        />
+      )}
+    </Field>
+  );
+}
+
 export function OtherErrors({ errors, shown }: { errors: Record<string, string[]>; shown: (key: string) => boolean }) {
   const messages = [...new Set(Object.entries(errors).flatMap(([key, list]) => (shown(key) ? [] : list)))];
   if (messages.length === 0) return null;

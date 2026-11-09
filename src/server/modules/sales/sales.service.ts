@@ -1,7 +1,14 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, ne, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { REQUEST_ID_REUSED, SALE_CHANGED_CONCURRENTLY, SALE_PAGE_SIZES } from "@/lib/sales";
+import {
+  hasInstallments,
+  installmentsRequiredMessage,
+  REQUEST_ID_REUSED,
+  SALE_CHANGED_CONCURRENTLY,
+  SALE_PAGE_SIZES,
+  SALE_REVERSED_READ_ONLY,
+} from "@/lib/sales";
 import type { Actor } from "@/server/authz/actor";
 import { assertPermission, hasPermission } from "@/server/authz/permissions";
 import { ownedScope } from "@/server/authz/scope";
@@ -44,6 +51,7 @@ import {
   replaceInstallmentSchedule,
 } from "@/server/modules/installments/installments.service";
 import { idSchema, parseInput } from "@/server/validation";
+import { insertSaleReceipt, prepareReceipt, receiptInputSchema } from "./sale-receipts.service";
 
 /**
  * Vendas: registro, consultas, edição, estorno e reativação (Documento Mestre
@@ -200,13 +208,15 @@ const createSaleSchema = z
     installmentCount: installmentCountSchema.nullish(),
     /** Cada ocorrência de curso com o seu preço; o total é a soma (004). */
     items: itemsToAddSchema.min(1, "Inclua pelo menos um curso."),
+    /** Comprovante de pagamento opcional (012): gravado na mesma transação. */
+    receipt: receiptInputSchema.optional(),
   })
   .superRefine((value, ctx) => {
     if (value.paymentMethod === "PIX" && value.installmentCount != null) {
       ctx.addIssue({ code: "custom", path: ["installmentCount"], message: "Pix é à vista: não informe parcelas." });
     }
-    if (value.paymentMethod === "CARD" && value.installmentCount == null) {
-      ctx.addIssue({ code: "custom", path: ["installmentCount"], message: "Informe a quantidade de parcelas do cartão." });
+    if (hasInstallments(value.paymentMethod) && value.installmentCount == null) {
+      ctx.addIssue({ code: "custom", path: ["installmentCount"], message: installmentsRequiredMessage(value.paymentMethod) });
     }
   });
 
@@ -257,7 +267,9 @@ type CourseSnapshot = { costCents: number; commissionCents: number };
  *
  * Idempotência: `requestId` (UUID gerado pelo formulário) vira o id da venda.
  * Repetir a mesma solicitação devolve a venda já gravada (`replayed: true`);
- * reutilizar o id com outros dados é recusado.
+ * reutilizar o id com outros dados é recusado. O comprovante opcional (012) é
+ * gravado junto com a venda; num replay ele é ignorado (a venda já existe com
+ * o comprovante enviado na primeira vez, ou sem nenhum).
  */
 export async function createSale(ctx: ServiceContext, input: unknown): Promise<CreateSaleResult> {
   const { db, actor } = ctx;
@@ -271,6 +283,7 @@ export async function createSale(ctx: ServiceContext, input: unknown): Promise<C
   // parcela com ao menos 1 centavo.
   assertInstallmentCountWithinLimit(data.installmentCount);
   assertInstallmentsFitTotal(data.paymentMethod, data.installmentCount, sumPrices(data.items));
+  const receipt = data.receipt ? prepareReceipt(data.receipt) : null;
 
   try {
     return await runTransaction(db, async (tx) => {
@@ -322,7 +335,7 @@ export async function createSale(ctx: ServiceContext, input: unknown): Promise<C
           addedBy: actor.userId,
         })),
       );
-      // Cartão: cronograma de parcelas (C52) na mesma transação; Pix: nenhum.
+      // Cartão e boleto: cronograma de parcelas (C52) na mesma transação; Pix: nenhum.
       await createInstallmentSchedule(tx, {
         id: data.requestId,
         status: "ACTIVE",
@@ -331,6 +344,7 @@ export async function createSale(ctx: ServiceContext, input: unknown): Promise<C
         paymentMethod: data.paymentMethod,
         installmentCount: data.installmentCount ?? null,
       });
+      if (receipt) await insertSaleReceipt(tx, actor, { id: data.requestId, teamId: seller.teamId }, receipt);
       await applySaleToLead(tx, actor, lead, seller, data.requestId, "SALE_CREATED", {
         totalCents,
         paymentMethod: data.paymentMethod,
@@ -463,7 +477,7 @@ async function lockCourseSnapshots(db: Database, courseIds: string[]): Promise<M
 
 /** Definida em @/lib/sales: a interface a reconhece para oferecer "Atualizar venda". */
 export { SALE_CHANGED_CONCURRENTLY };
-export const SALE_REVERSED_READ_ONLY = "Venda estornada é somente leitura para o vendedor.";
+export { SALE_REVERSED_READ_ONLY } from "@/lib/sales";
 export const SALE_ALREADY_REVERSED = "Esta venda já está estornada.";
 export const SALE_ALREADY_ACTIVE = "Esta venda já está válida.";
 export const SALE_NEEDS_ITEM = "A venda precisa de pelo menos um curso.";
@@ -622,8 +636,9 @@ export async function updateSale(ctx: ServiceContext, rawId: unknown, input: unk
     if (paymentMethod === "PIX" && installmentCount !== null) {
       throw new ValidationError("Pix é à vista: não informe parcelas.", { installmentCount: ["Pix é à vista: envie parcelas vazias."] });
     }
-    if (paymentMethod === "CARD" && installmentCount === null) {
-      throw new ValidationError("Informe a quantidade de parcelas do cartão.", { installmentCount: ["Informe a quantidade de parcelas do cartão."] });
+    if (hasInstallments(paymentMethod) && installmentCount === null) {
+      const message = installmentsRequiredMessage(paymentMethod);
+      throw new ValidationError(message, { installmentCount: [message] });
     }
     if (paymentMethod !== sale.paymentMethod) changes.paymentMethod = paymentMethod;
     if (installmentCount !== sale.installmentCount) {

@@ -3,7 +3,8 @@ import { and, count, eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ServiceContext } from "@/server/context";
 import type { DatabaseHandle } from "@/server/db/connect";
-import { leadEvents, leads, saleItems, sales, teams } from "@/server/db/schema";
+import { leadEvents, leads, saleItems, saleReceipts, sales, teams } from "@/server/db/schema";
+import { RECEIPT_CHANGED_CONCURRENTLY, RECEIPT_INVALID_TYPE } from "@/lib/receipts";
 import { MAX_INSTALLMENTS } from "@/lib/installments";
 import { INSTALLMENTS_EXCEED_TOTAL, INSTALLMENTS_OVER_LIMIT } from "@/server/modules/installments/installments.service";
 import { createLead, getLeadTimeline, REVERSAL_NEEDS_VALID_OWNER } from "@/server/modules/leads/leads.service";
@@ -114,6 +115,66 @@ describe("registro pela action", () => {
     const sale = await saleRow(fields.requestId as string);
     expect(sale).toMatchObject({ totalCents: 150_000 + 99_990 + 10, paymentMethod: "PIX", installmentCount: null, sellerId: org.ids.sellerA1 });
     expect(await currentPrices(sale.id)).toEqual([10, 99_990, 150_000]);
+  });
+
+  it("comprovante opcional: arquivo do formulário é gravado com a venda; campo vazio é ignorado; tipo inválido volta no campo", async () => {
+    await as(org.ids.sellerA1);
+    const pdf = new TextEncoder().encode("%PDF-1.4 %%EOF");
+    const withFile = createForm(await newLead(org.ids.sellerA1));
+    const data = form(withFile);
+    data.append("receipt", new File([pdf], "comprovante pix.pdf", { type: "application/pdf" }));
+    expect(await actions.createSaleAction(IDLE, data)).toMatchObject({ status: "success" });
+    const [stored] = await handle.db.select().from(saleReceipts).where(eq(saleReceipts.saleId, withFile.requestId as string));
+    expect(stored).toMatchObject({ fileName: "comprovante pix.pdf", contentType: "application/pdf", sizeBytes: pdf.byteLength, uploadedBy: org.ids.sellerA1 });
+
+    // Navegador sem arquivo escolhido envia um File vazio sem nome.
+    const empty = createForm(await newLead(org.ids.sellerA1));
+    const emptyData = form(empty);
+    emptyData.append("receipt", new File([], "", { type: "application/octet-stream" }));
+    expect(await actions.createSaleAction(IDLE, emptyData)).toMatchObject({ status: "success" });
+    expect(await handle.db.select().from(saleReceipts).where(eq(saleReceipts.saleId, empty.requestId as string))).toEqual([]);
+
+    const leadId = await newLead(org.ids.sellerA1);
+    const bad = form(createForm(leadId));
+    bad.append("receipt", new File(["<html>"], "falso.pdf", { type: "application/pdf" }));
+    expect(await actions.createSaleAction(IDLE, bad)).toMatchObject({ status: "error", fieldErrors: { receipt: [RECEIPT_INVALID_TYPE] } });
+    // Texto no lugar do arquivo (POST forjado) também é recusado.
+    expect(await actions.createSaleAction(IDLE, form(createForm(leadId, { receipt: "abc" })))).toMatchObject({ status: "error" });
+    expect(await salesOf(leadId)).toBe(0);
+  });
+
+  it("edição: anexar, trocar e remover o comprovante pelas actions; tela desatualizada recebe conflito", async () => {
+    await as(org.ids.sellerA1);
+    const fields = createForm(await newLead(org.ids.sellerA1));
+    expect(await actions.createSaleAction(IDLE, form(fields))).toMatchObject({ status: "success" });
+    const saleId = fields.requestId as string;
+    const current = async () =>
+      (await handle.db.select().from(saleReceipts).where(eq(saleReceipts.saleId, saleId))).filter((r) => r.removedAt === null);
+
+    const attach = form({ saleId, expectedReceiptId: "" });
+    attach.append("receipt", new File([new TextEncoder().encode("%PDF-1.4 a")], "a.pdf", { type: "application/pdf" }));
+    expect(await actions.replaceSaleReceiptAction(IDLE, attach)).toMatchObject({ status: "success", message: "Comprovante anexado." });
+    const [first] = await current();
+
+    const noFile = await actions.replaceSaleReceiptAction(IDLE, form({ saleId, expectedReceiptId: first.id }));
+    expect(noFile).toMatchObject({ status: "error", fieldErrors: { receipt: ["Escolha o arquivo do comprovante."] } });
+
+    const swap = form({ saleId, expectedReceiptId: first.id });
+    swap.append("receipt", new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1])], "b.jpg", { type: "image/jpeg" }));
+    expect(await actions.replaceSaleReceiptAction(IDLE, swap)).toMatchObject({ status: "success", message: "Comprovante trocado. O arquivo anterior foi apagado." });
+    const [second] = await current();
+    expect(second).toMatchObject({ fileName: "b.jpg", contentType: "image/jpeg" });
+
+    const stale = await actions.removeSaleReceiptAction(IDLE, form({ saleId, expectedReceiptId: first.id }));
+    expect(stale).toMatchObject({ status: "error", message: RECEIPT_CHANGED_CONCURRENTLY });
+    expect(await actions.removeSaleReceiptAction(IDLE, form({ saleId, expectedReceiptId: second.id }))).toMatchObject({
+      status: "success",
+      message: "Comprovante removido.",
+    });
+    expect(await current()).toEqual([]);
+
+    await as(org.ids.sellerB1);
+    expect(await actions.removeSaleReceiptAction(IDLE, form({ saleId, expectedReceiptId: second.id }))).toMatchObject({ status: "error", message: NOT_FOUND });
   });
 
   it("Cartão exige parcelas; Pix recusa parcelas", async () => {

@@ -24,7 +24,7 @@ async function rows<T>(query: ReturnType<typeof sql>): Promise<T[]> {
 // Paridade schema Drizzle × banco real (os SQLs de database/migrations)
 // ---------------------------------------------------------------------------
 
-/** Tabelas criadas pelas migrations 001–007 (conferidas no banco E no Drizzle). */
+/** Tabelas criadas pelas migrations 001–012 (conferidas no banco E no Drizzle). */
 const EXPECTED_TABLES = [
   "audit_events",
   "certificates",
@@ -37,6 +37,7 @@ const EXPECTED_TABLES = [
   "leads",
   "sale_events",
   "sale_items",
+  "sale_receipts",
   "sales",
   "seller_goals",
   "sessions",
@@ -62,6 +63,7 @@ const DB_CONTROLLED_COLUMNS: Record<string, string[]> = {
   sale_items: ["added_at", "removed_at", "added_txid", "removed_txid", "price_changed_txid", "price_tx_base"],
   sale_events: ["occurred_at", "txid", "metadata"],
   installments: ["paid_at", "replaced_at", "created_at"],
+  sale_receipts: ["created_at", "removed_at"],
 };
 
 const drizzleTables = Object.values(schema)

@@ -2,6 +2,7 @@ import { and, asc, count, eq, gte, ilike, isNull, lt, lte, sql, type SQL } from 
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { buildInstallmentSchedule, INSTALLMENT_FILTERS, INSTALLMENT_PAGE_SIZES, MAX_INSTALLMENTS } from "@/lib/installments";
+import { hasInstallments } from "@/lib/sales";
 import type { Actor } from "@/server/authz/actor";
 import { assertPermission } from "@/server/authz/permissions";
 import { ownedScope } from "@/server/authz/scope";
@@ -15,9 +16,9 @@ import { recordAudit } from "@/server/modules/audit/audit.service";
 import { idSchema, parseInput } from "@/server/validation";
 
 /**
- * Parcelas do cartão (Documento Mestre §12; decisão C52).
+ * Parcelas do cartão e do boleto parcelado (Documento Mestre §12; decisão C52; boleto: 011).
  *
- * - Só CARTÃO tem parcelas; Pix é à vista. Parcela n vence n meses após a data
+ * - Só CARTÃO e BOLETO têm parcelas; Pix é à vista. Parcela n vence n meses após a data
  *   da venda; os centavos que sobram ficam na 1ª (src/lib/installments.ts; o
  *   banco confere a mesma regra no COMMIT).
  * - O cronograma acompanha a venda, na MESMA transação das operações de venda
@@ -51,14 +52,14 @@ export function assertInstallmentCountWithinLimit(installmentCount: number | nul
 }
 
 /**
- * Cartão: a quantidade de parcelas não pode passar do total da venda em
+ * Cartão e boleto: a quantidade de parcelas não pode passar do total da venda em
  * centavos, para que cada parcela tenha pelo menos 1 centavo (o banco exige
  * amount_cents > 0, 006). Chamar ANTES de gravar a venda, na criação e na
  * edição (inclusive quando a remoção de itens ou a correção de preços reduz o
  * total). Independe do teto técnico (assertInstallmentCountWithinLimit).
  */
 export function assertInstallmentsFitTotal(paymentMethod: PaymentMethod, installmentCount: number | null | undefined, totalCents: number): void {
-  if (paymentMethod === "CARD" && installmentCount != null && installmentCount > totalCents) {
+  if (hasInstallments(paymentMethod) && installmentCount != null && installmentCount > totalCents) {
     throw new ValidationError(INSTALLMENTS_EXCEED_TOTAL, { installmentCount: [INSTALLMENTS_EXCEED_TOTAL] });
   }
 }
@@ -77,9 +78,9 @@ export type ScheduleSale = {
 // Cronograma (uso interno do serviço de vendas, dentro da transação dele)
 // ---------------------------------------------------------------------------
 
-/** Cria o cronograma atual: cartão → parcelas (canceladas se a venda está estornada); Pix → nada. */
+/** Cria o cronograma atual: cartão/boleto → parcelas (canceladas se a venda está estornada); Pix → nada. */
 export async function createInstallmentSchedule(tx: Database, sale: ScheduleSale): Promise<void> {
-  if (sale.paymentMethod !== "CARD" || !sale.installmentCount) return;
+  if (!hasInstallments(sale.paymentMethod) || !sale.installmentCount) return;
   const status: InstallmentStatus = sale.status === "ACTIVE" ? "OPEN" : "CANCELED";
   await tx
     .insert(installments)

@@ -23,7 +23,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const STATUS_SLUGS: Record<string, SaleStatus> = { validas: "ACTIVE", estornadas: "REVERSED" };
-const PAYMENT_SLUGS: Record<string, PaymentMethod> = { pix: "PIX", cartao: "CARD" };
+const PAYMENT_SLUGS: Record<string, PaymentMethod> = { pix: "PIX", cartao: "CARD", boleto: "BOLETO" };
 const slugOf = <T extends string>(map: Record<string, T>, value: T) => Object.keys(map).find((k) => map[k] === value);
 
 function first(raw: RawParams, key: string): string | undefined {

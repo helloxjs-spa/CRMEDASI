@@ -2,16 +2,18 @@ import type { Metadata } from "next";
 import { ArrowLeft, Lock } from "lucide-react";
 import Link from "next/link";
 import { ButtonLink } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { formatBRL } from "@/lib/money";
 import { listCourseFilterOptions } from "@/server/modules/courses/courses.service";
+import { getSaleReceiptInfo } from "@/server/modules/sales/sale-receipts.service";
 import { getSale, listSaleSellerOptions } from "@/server/modules/sales/sales.service";
 import { orNotFound } from "@/server/next/page";
 import { requireServiceContext } from "@/server/next/session";
 import { saleActionsFor, saleEditCapabilities } from "../../policy";
 import { SaleStatusBadge } from "../../sale-badges";
+import { ReceiptEditor } from "./receipt-editor";
 import { SaleEditForm } from "./sale-edit-form";
 
 export const metadata: Metadata = { title: "Editar venda" };
@@ -48,7 +50,11 @@ export default async function EditSalePage({ params }: PageProps<"/vendas/[saleI
   }
 
   const caps = saleEditCapabilities(ctx.actor);
-  const [courses, sellers] = await Promise.all([listCourseFilterOptions(ctx), caps.changeSeller ? listSaleSellerOptions(ctx) : Promise.resolve([])]);
+  const [courses, sellers, receipt] = await Promise.all([
+    listCourseFilterOptions(ctx),
+    caps.changeSeller ? listSaleSellerOptions(ctx) : Promise.resolve([]),
+    getSaleReceiptInfo(ctx, sale.id),
+  ]);
 
   return (
     <>
@@ -78,6 +84,17 @@ export default async function EditSalePage({ params }: PageProps<"/vendas/[saleI
           courses={courses.filter((c) => c.active).map(({ id, name, institutionName }) => ({ id, name, institutionName }))}
           sellers={sellers.map(({ id, name, teamName }) => ({ id, name, teamName }))}
         />
+      </Card>
+      {/* Comprovante: formulários próprios (não dependem da versão da venda); remonta quando o comprovante muda. */}
+      <Card className="mt-4">
+        <CardHeader title="Comprovante de pagamento" description="Trocar ou remover apaga o arquivo anterior; fica só o registro no histórico." />
+        <div className="p-5">
+          <ReceiptEditor
+            key={receipt?.id ?? "none"}
+            saleId={sale.id}
+            receipt={receipt && { id: receipt.id, fileName: receipt.fileName, sizeBytes: receipt.sizeBytes }}
+          />
+        </div>
       </Card>
     </>
   );

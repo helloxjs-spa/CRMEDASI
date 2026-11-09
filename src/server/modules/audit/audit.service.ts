@@ -30,12 +30,14 @@ export const AUDIT_ACTIONS = {
   "course.deactivated": "Curso desativado",
   "certificate.created": "Certificado registrado",
   "installment.paid": "Parcela marcada como paga",
+  "sale.receipt_attached": "Comprovante de pagamento anexado à venda",
+  "sale.receipt_removed": "Comprovante de pagamento removido da venda",
   "goal.set": "Meta mensal do vendedor definida",
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_ACTIONS;
 
-export const AUDIT_ENTITY_TYPES = ["user", "team", "session", "course", "certificate", "installment", "seller_goal"] as const;
+export const AUDIT_ENTITY_TYPES = ["user", "team", "session", "course", "certificate", "installment", "sale", "seller_goal"] as const;
 
 export type AuditInput = {
   actorId: string | null;

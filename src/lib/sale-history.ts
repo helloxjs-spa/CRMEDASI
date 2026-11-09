@@ -1,6 +1,6 @@
 import type { PaymentMethod, SaleEventType } from "@/server/db/schema";
 import { formatBRL } from "./money";
-import { formatSaleDate, PAYMENT_METHOD_LABELS } from "./sales";
+import { formatSaleDate, PAYMENT_METHOD_LABELS, paymentLabel } from "./sales";
 
 /**
  * Texto de cada evento do histórico da venda, montado SÓ a partir do
@@ -19,7 +19,7 @@ const money = (value: unknown) => (typeof value === "number" ? formatBRL(value) 
 const nameOf = (names: Names, id: unknown, fallback = "—") => (typeof id === "string" ? (names[id] ?? fallback) : fallback);
 
 function payment(value: unknown): string {
-  return value === "PIX" || value === "CARD" ? PAYMENT_METHOD_LABELS[value as PaymentMethod] : "—";
+  return typeof value === "string" && Object.hasOwn(PAYMENT_METHOD_LABELS, value) ? PAYMENT_METHOD_LABELS[value as PaymentMethod] : "—";
 }
 
 function changeLines(changes: Record<string, Change>, names: Names): string[] {
@@ -49,7 +49,11 @@ export function describeSaleEvent(
     case "CREATED": {
       const sale = (m.sale ?? {}) as Record<string, unknown>;
       const items = (m.items ?? []) as ItemSnapshot[];
-      const pay = sale.paymentMethod === "CARD" ? `Cartão em ${sale.installmentCount}x` : payment(sale.paymentMethod);
+      const method = sale.paymentMethod;
+      const pay =
+        method === "CARD" || method === "BOLETO"
+          ? paymentLabel(method, typeof sale.installmentCount === "number" ? sale.installmentCount : null)
+          : payment(method);
       return {
         title: "Venda registrada",
         lines: [

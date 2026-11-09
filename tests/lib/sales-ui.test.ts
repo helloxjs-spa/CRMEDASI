@@ -31,6 +31,7 @@ describe("formatação", () => {
     expect(formatSaleDate("2026-01-02")).toBe("02/01/2026");
     expect(paymentLabel("PIX", null)).toBe("Pix (à vista)");
     expect(paymentLabel("CARD", 12)).toBe("Cartão em 12x");
+    expect(paymentLabel("BOLETO", 4)).toBe("Boleto em 4x");
   });
 });
 

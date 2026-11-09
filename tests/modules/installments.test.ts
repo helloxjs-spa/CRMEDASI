@@ -32,7 +32,7 @@ const ctx = (userId: string) => org.ctx(userId);
 /** Venda registrada pelo ADMIN (que informa a data) para um lead novo do vendedor. */
 async function sale(
   sellerId: string,
-  opts: { prices?: number[]; method?: "PIX" | "CARD"; count?: number; date?: string; name?: string } = {},
+  opts: { prices?: number[]; method?: "PIX" | "CARD" | "BOLETO"; count?: number; date?: string; name?: string } = {},
 ): Promise<string> {
   const lead = await createLead(await ctx(sellerId), { name: opts.name ?? `Cliente Parcela ${seq + 1}`, phone: nextPhone(), interestCourseId: course });
   const method = opts.method ?? "CARD";
@@ -42,7 +42,7 @@ async function sale(
     sellerId,
     saleDate: opts.date ?? "2026-03-15",
     paymentMethod: method,
-    ...(method === "CARD" ? { installmentCount: opts.count ?? 3 } : {}),
+    ...(method !== "PIX" ? { installmentCount: opts.count ?? 3 } : {}),
     items: (opts.prices ?? [10_000]).map((priceCents) => ({ courseId: course, priceCents })),
   };
   return (await createSale(await ctx(org.ids.admin), input)).saleId;
@@ -85,6 +85,22 @@ describe("cronograma gerado com a venda (C52)", () => {
       [3, 3_333, "2026-06-15", "OPEN"],
     ]);
     expect(await schedule(await sale(org.ids.sellerA1, { method: "PIX" }))).toEqual([]);
+  });
+
+  it("boleto parcelado (011): mesmo cronograma do cartão; troca boleto ↔ cartão ↔ Pix refaz o cronograma", async () => {
+    const saleId = await sale(org.ids.sellerA1, { method: "BOLETO", count: 3 });
+    expect((await schedule(saleId)).map(({ number, amountCents, dueDate, status }) => [number, amountCents, dueDate, status])).toEqual([
+      [1, 3_334, "2026-04-15", "OPEN"],
+      [2, 3_333, "2026-05-15", "OPEN"],
+      [3, 3_333, "2026-06-15", "OPEN"],
+    ]);
+    const supervisor = await ctx(org.ids.supA);
+    await updateSale(supervisor, saleId, { expectedVersion: await version(saleId), paymentMethod: "CARD", installmentCount: 2 });
+    expect((await schedule(saleId)).map((p) => p.amountCents)).toEqual([5_000, 5_000]);
+    await updateSale(supervisor, saleId, { expectedVersion: await version(saleId), paymentMethod: "PIX", installmentCount: null });
+    expect(await schedule(saleId)).toEqual([]);
+    await updateSale(supervisor, saleId, { expectedVersion: await version(saleId), paymentMethod: "BOLETO", installmentCount: 1 });
+    expect((await schedule(saleId)).map((p) => [p.amountCents, p.dueDate])).toEqual([[10_000, "2026-04-15"]]);
   });
 
   it("fim de mês: o banco confere a mesma aritmética de datas do serviço", async () => {
@@ -374,6 +390,15 @@ describe("integridade no banco (006)", () => {
     await fails(sql`delete from installments where id = ${second.id}`, /não permitida/);
     await fails(sql`update installments set due_date = '2030-01-01' where id = ${second.id}`, /imutáveis/);
     await fails(sql`update installments set status = 'CANCELED' where id = ${second.id}`, /válida não pode ter parcela cancelada/);
+    await fails(
+      sql`insert into installments (sale_id, number, amount_cents, due_date) values (${saleId}, 3, 1, '2026-06-15')`,
+      /cronograma de parcelas deve ter/,
+    );
+  });
+
+  it("boleto parcelado (011): o banco exige a quantidade de parcelas e o cronograma, como no cartão", async () => {
+    const saleId = await sale(org.ids.sellerA1, { method: "BOLETO", count: 2 });
+    await fails(sql`update sales set installment_count = null where id = ${saleId}`, /sales_installments_consistent/);
     await fails(
       sql`insert into installments (sale_id, number, amount_cents, due_date) values (${saleId}, 3, 1, '2026-06-15')`,
       /cronograma de parcelas deve ter/,

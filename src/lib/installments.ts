@@ -44,7 +44,7 @@ export function addMonths(date: string, months: number): string {
 }
 
 /**
- * Cronograma do cartão (C52): `count` parcelas; a n-ésima vence `n` meses após
+ * Cronograma do cartão e do boleto (C52): `count` parcelas; a n-ésima vence `n` meses após
  * a data da venda; valor = total ÷ quantidade, com os centavos que sobram na
  * 1ª parcela (a soma é sempre o total).
  */

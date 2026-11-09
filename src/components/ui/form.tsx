@@ -75,17 +75,20 @@ export function SubmitButton({
   size,
   className,
   pending: pendingProp,
+  disabled,
 }: {
   children: ReactNode;
   variant?: ButtonVariant;
   size?: "sm" | "md";
   className?: string;
   pending?: boolean;
+  /** Desabilitado por outro motivo além do envio em andamento. */
+  disabled?: boolean;
 }) {
   const status = useFormStatus();
   const pending = pendingProp ?? status.pending;
   return (
-    <Button type="submit" variant={variant} size={size} disabled={pending} aria-busy={pending} className={className}>
+    <Button type="submit" variant={variant} size={size} disabled={pending || disabled} aria-busy={pending} className={className}>
       {pending && <Loader2 className="size-4 animate-spin" aria-hidden />}
       {children}
     </Button>

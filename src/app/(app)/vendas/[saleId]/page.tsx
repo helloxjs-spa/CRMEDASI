@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ArrowLeft, Pencil, Undo2 } from "lucide-react";
+import { ArrowLeft, Download, Paperclip, Pencil, Undo2 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ButtonLink } from "@/components/ui/button";
@@ -8,11 +8,13 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Table, Tbody, Td, Th } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/format";
 import { formatBRL } from "@/lib/money";
-import { formatSaleDate, paymentLabel } from "@/lib/sales";
+import { formatFileSize } from "@/lib/receipts";
+import { formatSaleDate, hasInstallments, paymentLabel } from "@/lib/sales";
 import { hasPermission } from "@/server/authz/permissions";
 import { BUSINESS_RULES } from "@/server/config/business-rules";
 import { getSaleItemCertificates } from "@/server/modules/certificates/certificates.service";
 import { getSaleInstallments } from "@/server/modules/installments/installments.service";
+import { getSaleReceiptInfo } from "@/server/modules/sales/sale-receipts.service";
 import { getSale, getSaleHistoryView, getSaleWithCost, type SaleItemView, type SaleItemWithCost, type SaleView } from "@/server/modules/sales/sales.service";
 import { orNotFound } from "@/server/next/page";
 import { requireServiceContext } from "@/server/next/session";
@@ -53,9 +55,12 @@ export default async function SalePage({ params }: PageProps<"/vendas/[saleId]">
   const canOperateCertificates = hasPermission(ctx.actor, "certificates:operate");
   const certificates = canOperateCertificates ? await getSaleItemCertificates(ctx, sale.id) : {};
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: BUSINESS_RULES.timezone }).format(now);
-  // Parcelas (§12; C52): só cartão tem cronograma.
+  // Parcelas (§12; C52): só cartão e boleto têm cronograma.
   const installments =
-    sale.paymentMethod === "CARD" && hasPermission(ctx.actor, "installments:markPaid") ? await getSaleInstallments(ctx, sale.id) : null;
+    hasInstallments(sale.paymentMethod) && hasPermission(ctx.actor, "installments:markPaid") ? await getSaleInstallments(ctx, sale.id) : null;
+  // Comprovante de pagamento opcional (012): só os dados aqui; o arquivo vem da rota /comprovante.
+  const receipt = await getSaleReceiptInfo(ctx, sale.id);
+  const receiptHref = `/vendas/${sale.id}/comprovante`;
 
   return (
     <>
@@ -108,6 +113,27 @@ export default async function SalePage({ params }: PageProps<"/vendas/[saleId]">
                 <span className="text-base font-semibold tabular-nums">{formatBRL(sale.totalCents)}</span>
               </Info>
               <Info label="Pagamento">{paymentLabel(sale.paymentMethod, sale.installmentCount)}</Info>
+              <Info label="Comprovante">
+                {receipt ? (
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <a
+                      href={receiptHref}
+                      target="_blank"
+                      rel="noopener"
+                      className="inline-flex min-w-0 items-center gap-1 text-brand-700 hover:underline"
+                      title={`${receipt.fileName} (${formatFileSize(receipt.sizeBytes)})`}
+                    >
+                      <Paperclip className="size-3.5 shrink-0" aria-hidden />
+                      <span className="truncate">{receipt.fileName}</span>
+                    </a>
+                    <a href={`${receiptHref}?download=1`} className="shrink-0 text-slate-500 hover:text-slate-800" aria-label="Baixar comprovante" title="Baixar">
+                      <Download className="size-3.5" aria-hidden />
+                    </a>
+                  </span>
+                ) : (
+                  "—"
+                )}
+              </Info>
               <Info label="Data da venda">{formatSaleDate(sale.saleDate)}</Info>
               <Info label="Responsável">{sale.sellerName}</Info>
               <Info label="Equipe da venda">{sale.teamName}</Info>
@@ -172,7 +198,7 @@ export default async function SalePage({ params }: PageProps<"/vendas/[saleId]">
 
           {installments && (
             <Card>
-              <CardHeader title="Parcelas" description={`Cartão em ${sale.installmentCount}x · a 1ª vence um mês após a data da venda`} />
+              <CardHeader title="Parcelas" description={`${paymentLabel(sale.paymentMethod, sale.installmentCount)} · a 1ª vence um mês após a data da venda`} />
               <Table>
                 <thead>
                   <tr>
