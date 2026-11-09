@@ -65,6 +65,20 @@ describe("describeAuditEvent", () => {
     expect(certificate.lines).toEqual(["Conclusão: 01/10/2026", "Entrega: 05/10/2026", "Certificadora: Cert"]);
   });
 
+  it("comprovante anexado: nome e tamanho do arquivo, com link para a venda", () => {
+    const receipt = describeAuditEvent({
+      action: "sale.receipt_attached",
+      metadata: { saleId: SALE, receiptId: "id-interno", fileName: "pix.pdf", contentType: "application/pdf", sizeBytes: 2048 },
+    });
+    expect(receipt.saleId).toBe(SALE);
+    expect(receipt.lines).toEqual(["Comprovante: pix.pdf", "Tamanho: 2 KB"]);
+    const swapped = describeAuditEvent({ action: "sale.receipt_attached", metadata: { saleId: SALE, fileName: "b.png", sizeBytes: 1024, replacedReceiptId: "id-interno" } });
+    expect(swapped.lines).toEqual(["Comprovante: b.png", "Tamanho: 1 KB", "Substituiu o comprovante anterior"]);
+    const removed = describeAuditEvent({ action: "sale.receipt_removed", metadata: { saleId: SALE, fileName: "pix.pdf", sizeBytes: 2048, replaced: false } });
+    expect(removed.saleId).toBe(SALE);
+    expect(removed.lines).toEqual(["Comprovante: pix.pdf", "Tamanho: 2 KB", "Arquivo apagado"]);
+  });
+
   it("meta: nome gravado do vendedor; primeira definição não mostra valor anterior", () => {
     const first = describeAuditEvent({ action: "goal.set", metadata: { sellerName: "Ana", month: "2026-11", fromCents: null, toCents: 50000 } });
     expect(first.target).toBe("Ana");

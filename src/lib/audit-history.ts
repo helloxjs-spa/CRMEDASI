@@ -3,6 +3,7 @@ import { ROLE_LABELS } from "./format";
 import { monthTitle } from "./goals";
 import { REPORT_LABELS, type ReportType } from "./reports";
 import { formatBRL } from "./money";
+import { formatFileSize } from "./receipts";
 import { formatSaleDate } from "./sales";
 
 /**
@@ -100,6 +101,18 @@ export function describeAuditEvent(event: { action: string; targetName?: string 
       return { target, lines: [moneyChange("Comissão", m)] };
     case "certificate.created":
       return { target, saleId, lines: [`Conclusão: ${day(m.completedOn)}`, `Entrega: ${day(m.deliveredOn)}`, `Certificadora: ${text(m.certifier)}`] };
+    case "sale.receipt_attached":
+    case "sale.receipt_removed":
+      return {
+        target,
+        saleId,
+        lines: [
+          `Comprovante: ${text(m.fileName)}`,
+          `Tamanho: ${typeof m.sizeBytes === "number" ? formatFileSize(m.sizeBytes) : "—"}`,
+          ...(event.action === "sale.receipt_attached" && m.replacedReceiptId ? ["Substituiu o comprovante anterior"] : []),
+          ...(event.action === "sale.receipt_removed" ? [m.replaced ? "Trocado por um novo arquivo (o anterior foi apagado)" : "Arquivo apagado"] : []),
+        ],
+      };
     case "installment.paid":
       return { target, saleId, lines: [`Parcela ${text(m.number)}: ${money(m.amountCents)}`, `Vencimento: ${day(m.dueDate)}`] };
     case "goal.set":
