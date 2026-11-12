@@ -72,7 +72,7 @@ async function ctx(userId: string): Promise<ServiceContext> {
 
 async function newLead(sellerId: string): Promise<string> {
   const phone = `5579${String(910000000 + ++seq).slice(0, 9)}`;
-  return (await createLead(await ctx(sellerId), { name: `Lead ${seq}`, phone, interestCourseId: COURSE })).id;
+  return (await createLead(await ctx(sellerId), { name: `Lead ${seq}`, phone, source: "GOOGLE", interestCourseId: COURSE })).id;
 }
 
 const waiting = async (n: number) => (await lockWaiters(monitor)).length >= n;

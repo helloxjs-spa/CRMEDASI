@@ -38,7 +38,7 @@ afterAll(() => handle.close());
 
 const ctx = (userId: string) => org.ctx(userId);
 const newLead = async () =>
-  (await createLead(await ctx(org.ids.sellerA1), { name: "Cliente", phone: `(79) 92${String(++seq).padStart(7, "0")}`, interestCourseId: course })).id;
+  (await createLead(await ctx(org.ids.sellerA1), { name: "Cliente", phone: `(79) 92${String(++seq).padStart(7, "0")}`, source: "GOOGLE", interestCourseId: course })).id;
 const itemsOf = (saleId: string) => handle.db.select().from(saleItems).where(eq(saleItems.saleId, saleId)).orderBy(asc(saleItems.addedAt), asc(saleItems.id));
 const saleRow = async (id: string) => (await handle.db.select().from(sales).where(eq(sales.id, id)))[0];
 const version = async (saleId: string) => (await getSale(await ctx(org.ids.admin), saleId)).version;
@@ -186,12 +186,12 @@ describe("edição de itens e preços", () => {
     );
   });
 
-  it("consultas: preço para todos no escopo; custo e lucro só para o ADMIN; correção de preço no histórico sem custos", async () => {
+  it("consultas: preço para todos no escopo; custo e lucro para ADMIN e SUPERVISOR; vendedor vê a correção de preço sem custos", async () => {
     const { saleId } = await sell([{ courseId: course, priceCents: 100_000 }]);
     const [item] = await itemsOf(saleId);
     await updateSale(await ctx(org.ids.supA), saleId, { expectedVersion: await version(saleId), repriceItems: [{ itemId: item.id, priceCents: 90_000 }] });
 
-    for (const userId of [org.ids.sellerA1, org.ids.supA]) {
+    for (const userId of [org.ids.sellerA1]) {
       const viewer = await ctx(userId);
       const sale = await getSale(viewer, saleId);
       expect(sale.items.map((i) => i.priceCents)).toEqual([90_000]);
@@ -202,6 +202,7 @@ describe("edição de itens e preços", () => {
       expect(payload).not.toContain("40000");
       await expect(getSaleWithCost(viewer, saleId)).rejects.toBeInstanceOf(ForbiddenError);
     }
+    expect((await getSaleWithCost(await ctx(org.ids.supA), saleId)).items).toHaveLength(1);
     const withCost = await getSaleWithCost(await ctx(org.ids.admin), saleId);
     expect(withCost.items.map((i) => [i.priceCents, i.costSnapshotCents, i.profitCents])).toEqual([[90_000, 40_000, 50_000]]);
     expect([withCost.costTotalCents, withCost.profitTotalCents]).toEqual([40_000, 50_000]);

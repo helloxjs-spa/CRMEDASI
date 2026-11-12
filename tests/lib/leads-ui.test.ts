@@ -4,8 +4,8 @@ import { boardParams, createdRangeInverted, hasResultFilters, leadsHref, parseLe
 import type { Actor } from "@/server/authz/actor";
 import { formatRelativeDateTime } from "@/lib/format";
 import { describeLeadEvent } from "@/lib/lead-timeline";
-import { deadlineInfo, followUpAlert, STAGE_ORDER, stageFromSlug, stageToSlug } from "@/lib/leads";
-import { LEAD_STAGES } from "@/server/db/schema";
+import { deadlineInfo, followUpAlert, SOURCE_ORDER, sourceLabel, STAGE_ORDER, stageFromSlug, stageToSlug } from "@/lib/leads";
+import { LEAD_SOURCES, LEAD_STAGES } from "@/server/db/schema";
 import type { LeadTimelineEntry } from "@/server/modules/leads/leads.service";
 
 // 2026-10-10 12:00 em São Paulo (UTC-3).
@@ -23,29 +23,49 @@ describe("etapas", () => {
   });
 });
 
-describe("cor do card de follow-up (6 h amarelo, depois de 8 h vermelho)", () => {
+describe("origem do lead", () => {
+  it("as opções seguem o enum do banco, na mesma ordem", () => {
+    expect(SOURCE_ORDER).toEqual([...LEAD_SOURCES]);
+  });
+
+  it("rótulo com o nome da campanha e lead sem origem", () => {
+    expect(sourceLabel({ source: "PAID_TRAFFIC", sourceDetail: null })).toBe("Tráfego pago");
+    expect(sourceLabel({ source: "OTHER_CAMPAIGN", sourceDetail: "Feira 2026" })).toBe("Outras campanhas: Feira 2026");
+    expect(sourceLabel({ source: null, sourceDetail: null })).toBe("Não informada");
+  });
+});
+
+describe("cor do card de FUP (C59: FUP 1 24 h; FUP 2 48 h; FUP 3 72 h)", () => {
   const NOW = new Date("2026-10-10T15:00:00Z");
   const hours = (h: number) => new Date(NOW.getTime() + h * 3_600_000);
-  /** Lead que entrou na etapa há `h` horas: o prazo gravado é a entrada + 8 h. */
-  const after = (h: number, stage: "FOLLOW_UP_1" | "FOLLOW_UP_2" | "FOLLOW_UP_3" = "FOLLOW_UP_1") =>
-    followUpAlert({ status: "ACTIVE", ownerId: "u1", stage, stageDueAt: hours(8 - h) }, NOW);
+  const DEADLINE = { FOLLOW_UP_1: 24, FOLLOW_UP_2: 48, FOLLOW_UP_3: 72 } as const;
+  /** Lead que entrou na etapa há `h` horas: o prazo gravado é a entrada + prazo da etapa. */
+  const after = (h: number, stage: "FOLLOW_UP_1" | "FOLLOW_UP_2" | "FOLLOW_UP_3") =>
+    followUpAlert({ status: "ACTIVE", ownerId: "u1", stage, stageDueAt: hours(DEADLINE[stage] - h) }, NOW);
 
-  it("sem cor antes de 6 h", () => {
-    expect(after(0)).toBe("none");
-    expect(after(5.99)).toBe("none");
+  it("FUP 1: sem cor até 24 h; vermelho depois", () => {
+    expect(after(0, "FOLLOW_UP_1")).toBe("none");
+    expect(after(23.99, "FOLLOW_UP_1")).toBe("none");
+    expect(after(24, "FOLLOW_UP_1")).toBe("red");
+    expect(after(30, "FOLLOW_UP_1")).toBe("red");
   });
 
-  it("amarelo de 6 h até o fim do prazo", () => {
-    expect(after(6)).toBe("warning");
-    expect(after(7.99)).toBe("warning");
-    expect(after(8)).toBe("warning");
+  it("FUP 2: laranja após 24 h; vermelho após 48 h", () => {
+    expect(after(23.99, "FOLLOW_UP_2")).toBe("none");
+    expect(after(24, "FOLLOW_UP_2")).toBe("orange");
+    expect(after(47.99, "FOLLOW_UP_2")).toBe("orange");
+    expect(after(48, "FOLLOW_UP_2")).toBe("red");
+    expect(after(60, "FOLLOW_UP_2")).toBe("red");
   });
 
-  it("vermelho depois de 8 h, nos três follow-ups", () => {
-    expect(after(8.01)).toBe("overdue");
-    expect(after(8.01, "FOLLOW_UP_2")).toBe("overdue");
-    expect(after(8.01, "FOLLOW_UP_3")).toBe("overdue");
-    expect(after(6, "FOLLOW_UP_3")).toBe("warning");
+  it("FUP 3: amarelo após 24 h; laranja após 48 h; vermelho após 72 h", () => {
+    expect(after(23.99, "FOLLOW_UP_3")).toBe("none");
+    expect(after(24, "FOLLOW_UP_3")).toBe("yellow");
+    expect(after(47.99, "FOLLOW_UP_3")).toBe("yellow");
+    expect(after(48, "FOLLOW_UP_3")).toBe("orange");
+    expect(after(71.99, "FOLLOW_UP_3")).toBe("orange");
+    expect(after(72, "FOLLOW_UP_3")).toBe("red");
+    expect(after(100, "FOLLOW_UP_3")).toBe("red");
   });
 
   it("negociação, lead sem responsável e Lixeira não mudam de cor", () => {
@@ -70,9 +90,9 @@ describe("situação do prazo", () => {
     expect(deadlineInfo({ ...base, stageDueAt: new Date("2026-10-11T03:01:00Z") }, NOW).kind).toBe("on_time");
   });
 
-  it("Follow-up 3 vencido = aguardando supervisor; sem responsável e Lixeira têm estado próprio", () => {
+  it("FUP 3 vencido é só vencido (C59); sem responsável e Lixeira têm estado próprio", () => {
     const due = new Date("2026-10-10T10:00:00Z");
-    expect(deadlineInfo({ ...base, stage: "FOLLOW_UP_3", stageDueAt: due }, NOW).kind).toBe("awaiting_supervisor");
+    expect(deadlineInfo({ ...base, stage: "FOLLOW_UP_3", stageDueAt: due }, NOW).kind).toBe("overdue");
     expect(deadlineInfo({ ...base, ownerId: null, stageDueAt: due }, NOW).kind).toBe("unassigned");
     expect(deadlineInfo({ ...base, status: "TRASHED", stageDueAt: due }, NOW).kind).toBe("none");
   });
@@ -143,11 +163,19 @@ describe("timeline: texto vem só do evento gravado", () => {
     expect(text.lines).toEqual(["Telefone: (79) 99999-9999 → (79) 88888-8888", "Curso: Pedagogia — Alpha → História — Beta"]);
   });
 
+  it("edição da origem: de/para com o nome da campanha; lead sem origem aparece como Não informada", () => {
+    const lines = (metadata: Record<string, unknown>) => describeLeadEvent(event({ type: "DETAILS_UPDATED", metadata })).lines;
+    expect(lines({ source: { from: { source: "GOOGLE", detail: null }, to: { source: "OTHER_CAMPAIGN", detail: "Feira" } } })).toEqual([
+      "Origem: Google → Outras campanhas: Feira",
+    ]);
+    expect(lines({ source: { from: null, to: { source: "STUDENT", detail: null } } })).toEqual(["Origem: Não informada → Aluno"]);
+  });
+
   it("etapa, Lixeira, recuperação e sem responsável", () => {
-    expect(describeLeadEvent(event({ type: "STAGE_CHANGED", stage: "FOLLOW_UP_1", fromStage: "NO_ANSWER" })).title).toBe("Movido para Follow-up 1");
-    expect(describeLeadEvent(event({ type: "TRASHED", stage: "NO_ANSWER" })).lines).toEqual(["Etapa preservada: Não respondeu"]);
+    expect(describeLeadEvent(event({ type: "STAGE_CHANGED", stage: "FOLLOW_UP_1", fromStage: "NO_ANSWER" })).title).toBe("Movido para FUP 1");
+    expect(describeLeadEvent(event({ type: "TRASHED", stage: "NO_ANSWER" })).lines).toEqual(["Etapa preservada: Lead quente (ou potencial)"]);
     expect(describeLeadEvent(event({ type: "RESTORED", stage: "REWORK", ownerName: "Bia", cycleNumber: 2 })).lines).toEqual([
-      "Retrabalho com Bia",
+      "Em contato com Bia",
       "Novo ciclo de atendimento: 2",
     ]);
     expect(describeLeadEvent(event({ type: "UNASSIGNED", ownerName: null, fromOwnerName: "João" })).lines[0]).toBe(
@@ -159,19 +187,26 @@ describe("timeline: texto vem só do evento gravado", () => {
 describe("URL da tela de Leads", () => {
   it("lê filtros válidos e ignora os inválidos", () => {
     const id = "6f1c2a0e-1b2c-4d3e-8f90-123456789abc";
-    expect(parseLeadsParams({ visao: "fila", motivo: "follow-up-3", q: " ana ", etapa: "em-negociacao", curso: "x", vendedor: id, pagina: "3", por: "50" })).toEqual({
+    expect(parseLeadsParams({ visao: "fila", motivo: "sem-responsavel", q: " ana ", etapa: "em-negociacao", curso: "x", vendedor: id, pagina: "3", por: "50" })).toEqual({
       view: "fila",
       q: "ana",
       stage: undefined,
       course: undefined,
       seller: id,
       team: undefined,
-      queue: "follow-up-3",
+      from: undefined,
+      to: undefined,
+      queue: "sem-responsavel",
       page: 3,
       size: 50,
       lead: undefined,
     });
-    expect(parseLeadsParams({ pagina: "-2", por: "30", visao: "admin" })).toMatchObject({ page: 1, size: 25, view: "carteira" });
+    expect(parseLeadsParams({ pagina: "-2", por: "30", visao: "admin", motivo: "follow-up-3" })).toMatchObject({
+      page: 1,
+      size: 25,
+      view: "carteira",
+      queue: "todos",
+    });
   });
 
   it("monta a URL omitindo os padrões e volta ao mesmo estado", () => {
@@ -236,24 +271,25 @@ describe("ações oferecidas pela interface (o backend revalida tudo)", () => {
   const past = new Date(Date.now() - 3_600_000);
   const lead = { status: "ACTIVE" as const, stage: "FOLLOW_UP_1" as const, ownerId: "a1", queueReason: null, stageDueAt: future };
 
-  it("vendedor responsável: editar, registrar atualização e mover para os destinos do mapa", () => {
+  it("vendedor responsável: editar, registrar atualização e mover para qualquer etapa do funil (C59)", () => {
     expect(leadActionsFor(lead, seller, free)).toEqual(["edit", "note", "move"]);
-    expect(moveTargetsFor(lead, seller, free)).toEqual(["FOLLOW_UP_2", "NEGOTIATION"]);
+    expect(moveTargetsFor(lead, seller, free)).toEqual(["NEW", "NO_ANSWER", "FOLLOW_UP_2", "FOLLOW_UP_3", "NEGOTIATION"]);
     expect(moveTargetsFor({ ...lead, ownerId: "a2" }, seller, free)).toEqual([]);
     expect(moveTargetsFor(lead, supervisor, free)).toEqual([]);
   });
 
-  it("Follow-up 3 vencido: somente leitura para o vendedor; supervisor redistribui ou envia para a Lixeira", () => {
-    const expired = { ...lead, stage: "FOLLOW_UP_3" as const, queueReason: "FOLLOW_UP_3_EXPIRED" as const, stageDueAt: past };
-    expect(leadActionsFor(expired, seller, free)).toEqual([]);
-    expect(moveTargetsFor(expired, seller, free)).toEqual([]);
-    expect(leadActionsFor(expired, supervisor)).toEqual(["edit", "redistribute", "trash"]);
+  it("FUP 3 vencido: o vendedor continua operando; supervisor pode transferir, redistribuir ou marcar Perdido", () => {
+    const expired = { ...lead, stage: "FOLLOW_UP_3" as const, stageDueAt: past };
+    expect(leadActionsFor(expired, seller, free)).toEqual(["edit", "note", "move"]);
+    expect(moveTargetsFor(expired, seller, free)).toContain("NEGOTIATION");
+    expect(leadActionsFor(expired, supervisor)).toEqual(["edit", "transfer", "redistribute", "trash"]);
+    expect(leadActionsFor({ ...expired, stageDueAt: future }, supervisor)).toEqual(["edit", "transfer", "trash"]);
   });
 
   it("negociação vencida: só a própria negociação continua movimentável", () => {
     expect(moveTargetsFor(lead, seller, blocked)).toEqual([]);
     const overdue = { ...lead, stage: "NEGOTIATION" as const, stageDueAt: past };
-    expect(moveTargetsFor(overdue, seller, blocked)).toEqual(["FOLLOW_UP_1"]);
+    expect(moveTargetsFor(overdue, seller, blocked)).toEqual(["NEW", "NO_ANSWER", "FOLLOW_UP_1", "FOLLOW_UP_2", "FOLLOW_UP_3"]);
     expect(leadActionsFor(lead, seller, blocked)).toEqual(["edit", "note"]);
   });
 

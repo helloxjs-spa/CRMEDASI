@@ -61,7 +61,7 @@ const userRow = async (id: string) => (await handle.db.select().from(users).wher
 async function legacyActiveSellerInInactiveTeam(name: string): Promise<{ teamId: string; sellerId: string; leadId: string }> {
   const teamId = await newTeam(`Equipe ${name}`);
   const sellerId = await insertUser(handle, { name: `Vendedor ${name}`, role: "SELLER", teamId });
-  const lead = await createLead(await org.ctx(sellerId), { name: "Lead Histórico", phone: nextPhone(), interestCourseId: courseId });
+  const lead = await createLead(await org.ctx(sellerId), { name: "Lead Histórico", phone: nextPhone(), source: "GOOGLE", interestCourseId: courseId });
   await handle.db.update(teams).set({ active: false }).where(eq(teams.id, teamId));
   return { teamId, sellerId, leadId: lead.id };
 }
@@ -118,7 +118,7 @@ describe("leads novos para vendedor de equipe inativa", () => {
   it("cadastro pelo próprio vendedor é recusado", async () => {
     const legacy = await legacyActiveSellerInInactiveTeam("Cadastro");
     const phone = nextPhone();
-    const error = await createLead(await org.ctx(legacy.sellerId), { name: "Novo", phone, interestCourseId: courseId }).catch((e: unknown) => e);
+    const error = await createLead(await org.ctx(legacy.sellerId), { name: "Novo", phone, source: "GOOGLE", interestCourseId: courseId }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ValidationError);
     expect((error as ValidationError).message).toBe(OWN_TEAM_INACTIVE);
     expect(await handle.db.select().from(leads).where(eq(leads.phone, `55${phone.replace(/\D/g, "")}`))).toEqual([]);
@@ -126,7 +126,7 @@ describe("leads novos para vendedor de equipe inativa", () => {
 
   it("transferência para ele é recusada; o lead e o histórico ficam iguais", async () => {
     const legacy = await legacyActiveSellerInInactiveTeam("Transferência");
-    const lead = await createLead(await org.ctx(org.ids.sellerA1), { name: "Ana", phone: nextPhone(), interestCourseId: courseId });
+    const lead = await createLead(await org.ctx(org.ids.sellerA1), { name: "Ana", phone: nextPhone(), source: "GOOGLE", interestCourseId: courseId });
     const before = await leadRow(lead.id);
 
     const error = await transferLead(await admin(), lead.id, { toSellerId: legacy.sellerId }).catch((e: unknown) => e);
@@ -138,7 +138,7 @@ describe("leads novos para vendedor de equipe inativa", () => {
 
   it("redistribuição para ele é recusada", async () => {
     const legacy = await legacyActiveSellerInInactiveTeam("Redistribuição");
-    const lead = await createLead(await org.ctx(org.ids.sellerA1), { name: "Bia", phone: nextPhone(), interestCourseId: courseId });
+    const lead = await createLead(await org.ctx(org.ids.sellerA1), { name: "Bia", phone: nextPhone(), source: "GOOGLE", interestCourseId: courseId });
     await setLeadStage(handle, lead.id, "FOLLOW_UP_3", -1);
 
     await expect(redistributeLead(await admin(), lead.id, { toSellerId: legacy.sellerId })).rejects.toBeInstanceOf(ValidationError);
@@ -148,7 +148,7 @@ describe("leads novos para vendedor de equipe inativa", () => {
 
   it("recuperação da Lixeira para ele é recusada; o lead continua na Lixeira", async () => {
     const legacy = await legacyActiveSellerInInactiveTeam("Recuperação");
-    const lead = await createLead(await org.ctx(org.ids.sellerA1), { name: "Caio", phone: nextPhone(), interestCourseId: courseId });
+    const lead = await createLead(await org.ctx(org.ids.sellerA1), { name: "Caio", phone: nextPhone(), source: "GOOGLE", interestCourseId: courseId });
     await trashLead(await admin(), lead.id);
 
     await expect(restoreLead(await admin(), lead.id, { toSellerId: legacy.sellerId })).rejects.toBeInstanceOf(ValidationError);
@@ -162,7 +162,7 @@ describe("leads novos para vendedor de equipe inativa", () => {
     const eventsBefore = await eventTypes(legacy.leadId);
 
     // Tentativas bloqueadas não mexem no histórico.
-    await createLead(await org.ctx(legacy.sellerId), { name: "X", phone: nextPhone(), interestCourseId: courseId }).catch(() => {});
+    await createLead(await org.ctx(legacy.sellerId), { name: "X", phone: nextPhone(), source: "GOOGLE", interestCourseId: courseId }).catch(() => {});
     await setUserActive(await admin(), legacy.sellerId, true).catch(() => {});
 
     expect(await leadRow(legacy.leadId)).toEqual(before);
@@ -172,7 +172,7 @@ describe("leads novos para vendedor de equipe inativa", () => {
   });
 
   it("transferência para vendedor de equipe ATIVA continua funcionando", async () => {
-    const lead = await createLead(await org.ctx(org.ids.sellerA1), { name: "Duda", phone: nextPhone(), interestCourseId: courseId });
+    const lead = await createLead(await org.ctx(org.ids.sellerA1), { name: "Duda", phone: nextPhone(), source: "GOOGLE", interestCourseId: courseId });
     await transferLead(await admin(), lead.id, { toSellerId: org.ids.sellerB1 });
     expect(await leadRow(lead.id)).toMatchObject({ ownerId: org.ids.sellerB1, teamId: org.ids.teamB });
   });

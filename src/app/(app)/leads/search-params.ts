@@ -9,7 +9,7 @@ import type { LeadStage } from "@/server/db/schema";
  */
 
 export type LeadsView = "carteira" | "fila" | "lixeira";
-export type QueueFilter = "todos" | "sem-responsavel" | "follow-up-3";
+export type QueueFilter = "todos" | "sem-responsavel";
 
 export type LeadsParams = {
   view: LeadsView;
@@ -69,7 +69,7 @@ export function parseLeadsParams(raw: RawParams): LeadsParams {
     team: uuid(raw, "equipe"),
     from: date(raw, "de"),
     to: date(raw, "ate"),
-    queue: queue === "sem-responsavel" || queue === "follow-up-3" ? queue : "todos",
+    queue: queue === "sem-responsavel" ? queue : "todos",
     page: Number.isInteger(page) && page > 1 ? page : 1,
     size: (LEAD_PAGE_SIZES as readonly number[]).includes(size) ? (size as LeadPageSize) : LEAD_PAGE_SIZES[0],
     lead: uuid(raw, "lead"),
@@ -120,7 +120,7 @@ export function hasResultFilters(p: LeadsParams): boolean {
   return !!(p.q || p.stage || p.course || p.seller || p.team || p.from || p.to);
 }
 
-const QUEUE_TO_SERVICE = { todos: "ALL", "sem-responsavel": "UNASSIGNED", "follow-up-3": "FOLLOW_UP_3_EXPIRED" } as const;
+const QUEUE_TO_SERVICE = { todos: "ALL", "sem-responsavel": "UNASSIGNED" } as const;
 
 /**
  * Converte a URL nos filtros do serviço. Quem não opera a carteira da equipe

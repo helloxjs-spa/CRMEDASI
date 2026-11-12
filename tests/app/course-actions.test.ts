@@ -42,7 +42,7 @@ beforeAll(async () => {
 afterAll(() => handle.close());
 
 describe("Server Actions de cursos chamadas diretamente", () => {
-  for (const who of ["sellerA1", "supA"] as const) {
+  for (const who of ["sellerA1"] as const) {
     it(`${who}: recebe erro de permissão sem nenhum dado do curso ou custo`, async () => {
       session.current = await org.ctx(org.ids[who]);
       const results = [

@@ -58,8 +58,8 @@ describe("lista operacional (sem custo)", () => {
   });
 });
 
-describe("custo da bolsa é exclusivo do ADMIN", () => {
-  for (const who of ["sellerA1", "supA"] as const) {
+describe("custo da bolsa: vendedor não vê nem altera", () => {
+  for (const who of ["sellerA1"] as const) {
     it(`${who}: não lista nem consulta cursos com custo`, async () => {
       const ctx = await org.ctx(org.ids[who]);
       await expect(listCoursesWithCost(ctx)).rejects.toBeInstanceOf(ForbiddenError);
@@ -255,9 +255,21 @@ describe("comissão do curso", () => {
     expect(await audited()).toEqual([{ name: "Comissão Auditada", institutionName: ALPHA, fromCents: 100_00, toCents: 180_00 }]);
   });
 
-  it("supervisor e vendedor não alteram", async () => {
-    for (const who of ["sellerA1", "supA"] as const) {
+  it("vendedor não altera", async () => {
+    for (const who of ["sellerA1"] as const) {
       await expect(updateCourse(await org.ctx(org.ids[who]), pedagogiaAlphaId, { commissionCents: 1 })).rejects.toBeInstanceOf(ForbiddenError);
     }
+  });
+});
+
+describe("supervisor gerencia cursos como o ADMIN", () => {
+  it("lista com custo, cria, altera custo e comissão e desativa", async () => {
+    const ctx = await org.ctx(org.ids.supA);
+    expect((await listCoursesWithCost(ctx)).length).toBeGreaterThan(0);
+    expect((await getCourseWithCost(ctx, pedagogiaAlphaId)).scholarshipCostCents).toBeGreaterThan(0);
+    const created = await createCourse(ctx, { name: "Curso do Supervisor", institutionName: ALPHA, commissionCents: 50_00, scholarshipCostCents: 10_00 });
+    await updateCourse(ctx, created.id, { scholarshipCostCents: 20_00, commissionCents: 60_00 });
+    expect(await getCourseWithCost(ctx, created.id)).toMatchObject({ scholarshipCostCents: 20_00, commissionCents: 60_00 });
+    await setCourseActive(ctx, created.id, false);
   });
 });

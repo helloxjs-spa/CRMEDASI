@@ -22,6 +22,7 @@ export const AUDIT_ACTIONS = {
   "user.deactivated": "Usuário desativado",
   "user.password_reset": "Senha redefinida pelo administrador",
   "user.team_changed": "Vendedor trocou de equipe",
+  "user.role_changed": "Perfil do usuário alterado",
   "team.created": "Equipe criada",
   "team.updated": "Equipe atualizada",
   "team.supervisor_changed": "Supervisor da equipe alterado",

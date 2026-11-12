@@ -38,9 +38,9 @@ describe("ownedScope em SQL", () => {
     expect(await visibleIds(org.ids.sellerA1, eq(users.id, org.ids.sellerA2))).toEqual([]);
   });
 
-  it("supervisor enxerga apenas registros da própria equipe", async () => {
-    expect(await visibleIds(org.ids.supA)).toEqual([org.ids.sellerA1, org.ids.sellerA2].sort());
-    expect(await visibleIds(org.ids.supA, eq(users.id, org.ids.sellerB1))).toEqual([]);
+  it("supervisor enxerga tudo, como o administrador (inclusive outra equipe)", async () => {
+    expect(await visibleIds(org.ids.supA)).toHaveLength(6);
+    expect(await visibleIds(org.ids.supA, eq(users.id, org.ids.sellerB1))).toEqual([org.ids.sellerB1]);
   });
 
   it("administrador enxerga tudo", async () => {

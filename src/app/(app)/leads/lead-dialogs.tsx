@@ -4,8 +4,9 @@ import { Pencil, Plus } from "lucide-react";
 import { useState } from "react";
 import { ActionDialog } from "@/components/ui/action-dialog";
 import { Field, Input, Select } from "@/components/ui/form";
-import { courseLabel } from "@/lib/leads";
+import { courseLabel, SOURCE_DETAIL_MAX_LENGTH, SOURCE_LABELS, SOURCE_ORDER, SOURCE_WITH_DETAIL } from "@/lib/leads";
 import { formatPhone, parseBrazilianPhone } from "@/lib/phone";
+import type { LeadSource } from "@/server/db/schema";
 import { createLeadAction, editLeadAction } from "./actions";
 
 export type CourseChoice = { id: string; name: string; institutionName: string; active: boolean };
@@ -36,6 +37,66 @@ function PhoneField({ id, defaultValue, errors }: { id: string; defaultValue?: s
   );
 }
 
+/**
+ * Origem do lead (obrigatória). "Outras campanhas" abre o campo do nome da
+ * campanha. Controlados: os valores ficam no formulário após um erro.
+ */
+function SourceFields({
+  idPrefix,
+  errors,
+  lead,
+}: {
+  idPrefix: string;
+  errors: Record<string, string[]>;
+  lead?: { source: LeadSource | null; sourceDetail: string | null };
+}) {
+  const [source, setSource] = useState<string>(lead?.source ?? "");
+  const [detail, setDetail] = useState(lead?.sourceDetail ?? "");
+  return (
+    <>
+      <Field
+        label="Origem do lead"
+        htmlFor={`${idPrefix}-source`}
+        errors={errors.source}
+        hint={lead && !lead.source ? "Lead cadastrado antes deste campo: informe a origem para salvar." : undefined}
+      >
+        <Select
+          id={`${idPrefix}-source`}
+          name="source"
+          required
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+          aria-invalid={errors.source?.length ? true : undefined}
+        >
+          <option value="" disabled>
+            Selecione a origem
+          </option>
+          {SOURCE_ORDER.map((value) => (
+            <option key={value} value={value}>
+              {SOURCE_LABELS[value]}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      {source === SOURCE_WITH_DETAIL && (
+        <Field label="Qual campanha?" htmlFor={`${idPrefix}-source-detail`} errors={errors.sourceDetail}>
+          <Input
+            id={`${idPrefix}-source-detail`}
+            name="sourceDetail"
+            required
+            maxLength={SOURCE_DETAIL_MAX_LENGTH}
+            autoComplete="off"
+            placeholder="Nome da campanha"
+            value={detail}
+            onChange={(e) => setDetail(e.target.value)}
+            aria-invalid={errors.sourceDetail?.length ? true : undefined}
+          />
+        </Field>
+      )}
+    </>
+  );
+}
+
 function LeadFields({
   idPrefix,
   errors,
@@ -45,7 +106,7 @@ function LeadFields({
   idPrefix: string;
   errors: Record<string, string[]>;
   courses: CourseChoice[];
-  lead?: { name: string; phone: string; interestCourseId: string };
+  lead?: { name: string; phone: string; interestCourseId: string; source: LeadSource | null; sourceDetail: string | null };
 }) {
   // Na edição, um curso inativado depois do cadastro continua disponível só
   // como o valor atual (mantê-lo não é uma mudança); outros inativos não aparecem.
@@ -77,6 +138,7 @@ function LeadFields({
           ))}
         </Select>
       </Field>
+      <SourceFields idPrefix={idPrefix} errors={errors} lead={lead} />
     </>
   );
 }
@@ -102,8 +164,8 @@ export function NewLeadDialog({
       title="Novo lead"
       description={
         sellers
-          ? "O lead entra na carteira do vendedor escolhido, na etapa Lead cadastrado."
-          : "O lead entra na sua carteira, na etapa Lead cadastrado."
+          ? "O lead entra na carteira do vendedor escolhido, na etapa Em contato."
+          : "O lead entra na sua carteira, na etapa Em contato."
       }
       action={createLeadAction}
       submitLabel="Cadastrar lead"
@@ -136,7 +198,7 @@ export function EditLeadDialog({
   lead,
   courses,
 }: {
-  lead: { id: string; name: string; phone: string; interestCourseId: string };
+  lead: { id: string; name: string; phone: string; interestCourseId: string; source: LeadSource | null; sourceDetail: string | null };
   courses: CourseChoice[];
 }) {
   return (

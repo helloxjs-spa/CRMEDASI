@@ -47,7 +47,7 @@ beforeEach(() => {
 });
 
 const newLead = async () =>
-  (await createLead(await org.ctx(org.ids.sellerA1), { name: "Cliente", phone: `(79) 94${String(++seq).padStart(7, "0")}`, interestCourseId: course })).id;
+  (await createLead(await org.ctx(org.ids.sellerA1), { name: "Cliente", phone: `(79) 94${String(++seq).padStart(7, "0")}`, source: "GOOGLE", interestCourseId: course })).id;
 
 async function snapshot(leadId: string) {
   return {

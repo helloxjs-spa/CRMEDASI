@@ -1,13 +1,11 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { STAGE_TRANSITIONS, STAGES_WITH_DEADLINE } from "@/lib/leads";
-import { BUSINESS_RULES } from "@/server/config/business-rules";
+import { STAGE_TRANSITIONS, stageDeadlineHours, STAGES_WITH_DEADLINE } from "@/lib/leads";
 import type { DatabaseHandle } from "@/server/db/connect";
 import { LEAD_STAGES, leadCycles, leadEvents, leads, type LeadStage } from "@/server/db/schema";
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@/server/errors";
+import { ForbiddenError, NotFoundError, ValidationError } from "@/server/errors";
 import {
   addLeadNote,
-  AWAITING_SUPERVISOR_MESSAGE,
   createLead,
   editLead,
   getLead,
@@ -33,7 +31,7 @@ afterAll(() => handle.close());
 
 let phoneSeq = 0;
 async function newLead(sellerId: string, name = "Lead Kanban") {
-  return (await createLead(await org.ctx(sellerId), { name, phone: `(79) 9${String(++phoneSeq).padStart(8, "0")}`, interestCourseId: courseId })).id;
+  return (await createLead(await org.ctx(sellerId), { name, phone: `(79) 9${String(++phoneSeq).padStart(8, "0")}`, source: "GOOGLE", interestCourseId: courseId })).id;
 }
 
 /** Coloca o lead na etapa, com prazo futuro quando a etapa tem prazo. */
@@ -60,24 +58,31 @@ describe("transições válidas (vendedor responsável)", () => {
     const row = await rowOf(id);
     expect(Math.abs(hoursFromNow(row.stageEnteredAt)!)).toBeLessThan(0.05);
     if (STAGES_WITH_DEADLINE.includes(to)) {
-      const expected = to === "NEGOTIATION" ? BUSINESS_RULES.negotiationDeadlineHours : BUSINESS_RULES.followUpDeadlineHours;
-      expect(hoursFromNow(row.stageDueAt)).toBeCloseTo(expected, 1);
+      expect(hoursFromNow(row.stageDueAt)).toBeCloseTo(stageDeadlineHours(to)!, 1);
     } else {
       expect(row.stageDueAt).toBeNull();
     }
   });
 
-  it("o mapa cobre exatamente o fluxo combinado", () => {
+  it("o mapa cobre exatamente o fluxo combinado (C59: livre entre as etapas do funil)", () => {
     expect(STAGE_TRANSITIONS).toEqual({
-      NEW: ["NO_ANSWER", "NEGOTIATION"],
-      NO_ANSWER: ["FOLLOW_UP_1", "NEGOTIATION"],
-      FOLLOW_UP_1: ["FOLLOW_UP_2", "NEGOTIATION"],
-      FOLLOW_UP_2: ["FOLLOW_UP_3", "NEGOTIATION"],
-      FOLLOW_UP_3: ["NEGOTIATION"],
-      NEGOTIATION: ["FOLLOW_UP_1"],
-      REWORK: ["FOLLOW_UP_1"],
+      NEW: ["NO_ANSWER", "FOLLOW_UP_1", "FOLLOW_UP_2", "FOLLOW_UP_3", "NEGOTIATION"],
+      NO_ANSWER: ["NEW", "FOLLOW_UP_1", "FOLLOW_UP_2", "FOLLOW_UP_3", "NEGOTIATION"],
+      FOLLOW_UP_1: ["NEW", "NO_ANSWER", "FOLLOW_UP_2", "FOLLOW_UP_3", "NEGOTIATION"],
+      FOLLOW_UP_2: ["NEW", "NO_ANSWER", "FOLLOW_UP_1", "FOLLOW_UP_3", "NEGOTIATION"],
+      FOLLOW_UP_3: ["NEW", "NO_ANSWER", "FOLLOW_UP_1", "FOLLOW_UP_2", "NEGOTIATION"],
+      NEGOTIATION: ["NEW", "NO_ANSWER", "FOLLOW_UP_1", "FOLLOW_UP_2", "FOLLOW_UP_3"],
+      REWORK: ["NEW", "NO_ANSWER", "FOLLOW_UP_1", "FOLLOW_UP_2", "FOLLOW_UP_3", "NEGOTIATION"],
       CLOSED: [],
     });
+  });
+
+  it("prazos por etapa: FUP 1 24 h, FUP 2 48 h, FUP 3 72 h, Negociação 24 h; demais sem prazo", () => {
+    expect(stageDeadlineHours("FOLLOW_UP_1")).toBe(24);
+    expect(stageDeadlineHours("FOLLOW_UP_2")).toBe(48);
+    expect(stageDeadlineHours("FOLLOW_UP_3")).toBe(72);
+    expect(stageDeadlineHours("NEGOTIATION")).toBe(24);
+    for (const stage of ["NEW", "NO_ANSWER", "CLOSED", "REWORK"] as const) expect(stageDeadlineHours(stage)).toBeNull();
   });
 });
 
@@ -96,15 +101,14 @@ describe("transições inválidas são recusadas no backend", () => {
     expect(await rowOf(id)).toEqual(before);
   });
 
-  it("mensagens claras para Fechamento, Retrabalho e volta de etapa", async () => {
+  it("mensagens claras para Vendido, Retrabalho, mesma etapa e saída de Vendido", async () => {
     const id = await newLead(org.ids.sellerA1);
     await putIn(id, "FOLLOW_UP_3");
     const seller = await org.ctx(org.ids.sellerA1);
     const message = (to: LeadStage) => moveLeadStage(seller, id, { toStage: to }).catch((e: Error) => e.message);
-    expect(await message("CLOSED")).toBe("Fechamento só acontece ao registrar uma venda.");
-    expect(await message("REWORK")).toBe("Retrabalho só acontece por redistribuição ou recuperação da Lixeira, feitas pelo supervisor.");
-    expect(await message("FOLLOW_UP_2")).toBe("Movimentação não permitida: de Follow-up 3 para Follow-up 2.");
-    expect(await message("FOLLOW_UP_3")).toBe("O lead já está em Follow-up 3.");
+    expect(await message("CLOSED")).toBe("Vendido só acontece ao registrar uma venda.");
+    expect(await message("REWORK")).toBe("Em contato (nova tentativa) só acontece por redistribuição ou recuperação de Perdido, feitas pelo supervisor.");
+    expect(await message("FOLLOW_UP_3")).toBe("O lead já está em FUP 3.");
     await expect(moveLeadStage(seller, id, { toStage: "QUALQUER" })).rejects.toBeInstanceOf(ValidationError);
   });
 });
@@ -128,36 +132,22 @@ describe("quem pode movimentar", () => {
   });
 });
 
-describe("Follow-up 3", () => {
+describe("FUP 3", () => {
   it("não vencido: pode ir para Negociação", async () => {
     const id = await newLead(org.ids.sellerA1);
     await setLeadStage(handle, id, "FOLLOW_UP_3", 2);
     await expect(moveLeadStage(await org.ctx(org.ids.sellerA1), id, { toStage: "NEGOTIATION" })).resolves.toMatchObject({ stage: "NEGOTIATION" });
   });
 
-  it("vencido: somente leitura para o vendedor; supervisor ainda edita", async () => {
-    const id = await newLead(org.ids.sellerA1, "Aguardando");
+  it("vencido só fica vermelho (C59): o vendedor continua editando, registrando e movimentando; não entra na fila", async () => {
+    const id = await newLead(org.ids.sellerA1, "Vencido");
     await setLeadStage(handle, id, "FOLLOW_UP_3", -1);
-    const before = await rowOf(id);
     const seller = await org.ctx(org.ids.sellerA1);
 
-    for (const attempt of [
-      moveLeadStage(seller, id, { toStage: "NEGOTIATION" }),
-      editLead(seller, id, { name: "Outro Nome" }),
-      addLeadNote(seller, id, { body: "Tentando sair da fila" }),
-    ]) {
-      const error = await attempt.catch((e: unknown) => e);
-      expect(error).toBeInstanceOf(ConflictError);
-      expect((error as Error).message).toBe(AWAITING_SUPERVISOR_MESSAGE);
-    }
-    expect(await rowOf(id)).toEqual(before);
-
-    // Continua visível, com histórico, para o vendedor.
-    await expect(getLead(seller, id)).resolves.toMatchObject({ queueReason: "FOLLOW_UP_3_EXPIRED" });
-    await expect(getLeadTimeline(seller, id)).resolves.toHaveLength(1);
-    await expect(editLead(await org.ctx(org.ids.supA), id, { name: "Corrigido pelo Supervisor" })).resolves.toMatchObject({
-      name: "Corrigido pelo Supervisor",
-    });
+    await expect(getLead(seller, id)).resolves.toMatchObject({ queueReason: null });
+    await expect(editLead(seller, id, { name: "Outro Nome" })).resolves.toMatchObject({ name: "Outro Nome" });
+    await expect(addLeadNote(seller, id, { body: "Liguei de novo." })).resolves.toBeUndefined();
+    await expect(moveLeadStage(seller, id, { toStage: "NEGOTIATION" })).resolves.toMatchObject({ stage: "NEGOTIATION" });
   });
 });
 
@@ -177,7 +167,7 @@ describe("prazos", () => {
     expect(hoursFromNow(renewed.stageDueAt)).toBeCloseTo(24, 1);
 
     await moveLeadStage(seller, id, { toStage: "FOLLOW_UP_1" });
-    expect(hoursFromNow((await rowOf(id)).stageDueAt)).toBeCloseTo(8, 1);
+    expect(hoursFromNow((await rowOf(id)).stageDueAt)).toBeCloseTo(24, 1);
 
     const other = await newLead(org.ids.sellerA1);
     await moveLeadStage(seller, other, { toStage: "NO_ANSWER" });
@@ -202,7 +192,7 @@ describe("negociação vencida bloqueia o vendedor", () => {
 
   it("não cadastra lead nem movimenta outro lead; consulta continua liberada", async () => {
     const ctx = await org.ctx(seller);
-    const create = await createLead(ctx, { name: "Novo", phone: "(79) 98888-7777", interestCourseId: courseId }).catch((e: unknown) => e);
+    const create = await createLead(ctx, { name: "Novo", phone: "(79) 98888-7777", source: "GOOGLE", interestCourseId: courseId }).catch((e: unknown) => e);
     expect(create).toBeInstanceOf(NegotiationOverdueError);
     expect((create as Error).message).toBe("Você possui 2 negociações vencidas. Atualize-as para continuar cadastrando ou movimentando leads.");
     await expect(moveLeadStage(ctx, other, { toStage: "NO_ANSWER" })).rejects.toBeInstanceOf(NegotiationOverdueError);
@@ -215,7 +205,7 @@ describe("negociação vencida bloqueia o vendedor", () => {
   });
 
   it("o bloqueio é só desse vendedor", async () => {
-    await expect(createLead(await org.ctx(org.ids.sellerA2), { name: "Livre", phone: "(79) 98888-6666", interestCourseId: courseId })).resolves.toBeTruthy();
+    await expect(createLead(await org.ctx(org.ids.sellerA2), { name: "Livre", phone: "(79) 98888-6666", source: "GOOGLE", interestCourseId: courseId })).resolves.toBeTruthy();
     expect(await getNegotiationBlock(await org.ctx(org.ids.sellerA2))).toEqual({ count: 0, leads: [] });
     expect(await getNegotiationBlock(await org.ctx(org.ids.supA))).toBeNull();
   });
@@ -244,7 +234,7 @@ describe("negociação vencida bloqueia o vendedor", () => {
     await addLeadNote(ctx, second, { body: "Proposta enviada." });
     expect(await getNegotiationBlock(ctx)).toEqual({ count: 0, leads: [] });
     await expect(moveLeadStage(ctx, other, { toStage: "NO_ANSWER" })).resolves.toMatchObject({ stage: "NO_ANSWER" });
-    await expect(createLead(ctx, { name: "Agora Pode", phone: "(79) 98888-5555", interestCourseId: courseId })).resolves.toBeTruthy();
+    await expect(createLead(ctx, { name: "Agora Pode", phone: "(79) 98888-5555", source: "GOOGLE", interestCourseId: courseId })).resolves.toBeTruthy();
   });
 });
 

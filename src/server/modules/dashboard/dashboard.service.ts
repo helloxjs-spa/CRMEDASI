@@ -4,7 +4,7 @@ import { lastMonths, percentChange } from "@/lib/dashboard";
 import { isValidMonth, monthRange } from "@/lib/ranking";
 import type { Actor } from "@/server/authz/actor";
 import { assertPermission, hasPermission } from "@/server/authz/permissions";
-import { managedTeamScope } from "@/server/authz/scope";
+import { companyScope } from "@/server/authz/scope";
 import type { ServiceContext } from "@/server/context";
 import { saleItems, sales, users } from "@/server/db/schema";
 import { parseInput } from "@/server/validation";
@@ -57,7 +57,7 @@ const COMPARISON_MONTHS = 12;
 /** Exige `users` (responsável) no FROM, ligado por `sales.seller_id`. */
 function salesScope(actor: Actor): SQL | undefined {
   if (actor.role === "SELLER") return eq(sales.sellerId, actor.userId);
-  return managedTeamScope(actor, users.teamId);
+  return companyScope(actor);
 }
 
 const sumBigint = (column: SQL | typeof sales.totalCents) => sql<number>`coalesce(sum(${column}), 0)::bigint`.mapWith(Number);

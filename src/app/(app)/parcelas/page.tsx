@@ -51,9 +51,7 @@ export default async function InstallmentsPage({ searchParams }: PageProps<"/par
         description={
           ctx.actor.role === "SELLER"
             ? "Parcelas das vendas no cartão ou no boleto em que você é o responsável."
-            : ctx.actor.role === "SUPERVISOR"
-              ? "Parcelas das vendas no cartão dos vendedores da sua equipe."
-              : "Parcelas de todas as vendas no cartão ou no boleto."
+            : "Parcelas de todas as vendas no cartão ou no boleto."
         }
       />
 

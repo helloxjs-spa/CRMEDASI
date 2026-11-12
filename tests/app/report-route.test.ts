@@ -30,7 +30,7 @@ beforeAll(async () => {
   handle = await createTestDatabase();
   org = await seedOrganization(handle);
   const course = await insertCourseWithCost(handle, "Pedagogia", 40_000);
-  const lead = await createLead(await org.ctx(org.ids.sellerA1), { name: "=Aluno Fórmula", phone: "(79) 99111-0001", interestCourseId: course });
+  const lead = await createLead(await org.ctx(org.ids.sellerA1), { name: "=Aluno Fórmula", phone: "(79) 99111-0001", source: "GOOGLE", interestCourseId: course });
   await createSale(await org.ctx(org.ids.admin), {
     requestId: crypto.randomUUID(),
     leadId: lead.id,
@@ -43,7 +43,7 @@ beforeAll(async () => {
 afterAll(() => handle.close());
 
 describe("GET /relatorios/exportar", () => {
-  it("devolve CSV para download (BOM, ';', anexo, sem cache), com os filtros da URL e o custo só para o ADMIN", async () => {
+  it("devolve CSV para download (BOM, ';', anexo, sem cache), com os filtros da URL e o custo para ADMIN e SUPERVISOR", async () => {
     session.current = await org.ctx(org.ids.admin);
     const response = await get("tipo=sales&dateFrom=2026-07-01&dateTo=2026-07-31&campoIgnorado=1");
     expect(response.status).toBe(200);
@@ -59,7 +59,10 @@ describe("GET /relatorios/exportar", () => {
 
     session.current = await org.ctx(org.ids.supA);
     const supervisor = await (await get("tipo=sales")).text();
-    expect(supervisor).not.toMatch(/Custo|Lucro/);
+    expect(supervisor).toMatch(/Custo das bolsas/);
+
+    session.current = await org.ctx(org.ids.sellerA1);
+    expect((await get("tipo=sales")).status).not.toBe(200);
   });
 
   it("erro de negócio volta para /relatorios só com um código conhecido, nunca com a mensagem", async () => {

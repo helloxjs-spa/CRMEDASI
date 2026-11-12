@@ -24,7 +24,6 @@ import {
 import { assertPermission } from "@/server/authz/permissions";
 import { BUSINESS_RULES } from "@/server/config/business-rules";
 import { getRanking, type RankingResult, type SellerRankingEntry, type TeamRankingEntry } from "@/server/modules/ranking/ranking.service";
-import { getMyTeam } from "@/server/modules/teams/teams.service";
 import { requireServiceContext } from "@/server/next/session";
 
 export const metadata: Metadata = { title: "Ranking" };
@@ -48,10 +47,7 @@ export default async function RankingPage({ searchParams }: PageProps<"/ranking"
   const params: RankingParams = isSeller ? { ...parsed, view: "sellers" } : parsed;
   const { from, to } = periodRange(params.period);
 
-  const [result, myTeam] = await Promise.all([
-    getRanking(ctx, { view: params.view, criterion: params.criterion, dateFrom: from, dateTo: to }),
-    actor.role === "SUPERVISOR" && params.view === "sellers" ? getMyTeam(ctx) : Promise.resolve(null),
-  ]);
+  const result = await getRanking(ctx, { view: params.view, criterion: params.criterion, dateFrom: from, dateTo: to });
 
   return (
     <>
@@ -60,9 +56,7 @@ export default async function RankingPage({ searchParams }: PageProps<"/ranking"
         description={
           isSeller
             ? "Sua posição no ranking geral de vendedores da empresa."
-            : actor.role === "SUPERVISOR"
-              ? "Vendedores da sua equipe e ranking das equipes."
-              : "Ranking de vendedores e de equipes da empresa."
+            : "Ranking de vendedores e de equipes da empresa."
         }
       />
 
@@ -136,7 +130,7 @@ export default async function RankingPage({ searchParams }: PageProps<"/ranking"
         )}
       </Card>
 
-      <RankingResults result={result} teamName={myTeam?.name ?? null} />
+      <RankingResults result={result} />
 
       <p className="mt-3 text-xs text-slate-500">
         Só vendas válidas contam (estornadas ficam de fora). Equipes: a equipe da venda na época. Participa quem tem venda válida no
@@ -146,7 +140,7 @@ export default async function RankingPage({ searchParams }: PageProps<"/ranking"
   );
 }
 
-function RankingResults({ result, teamName }: { result: RankingResult; teamName: string | null }) {
+function RankingResults({ result }: { result: RankingResult }) {
   if (result.mode === "self") return <SelfPosition result={result} />;
   if (result.entries.length === 0) {
     return (
@@ -154,7 +148,7 @@ function RankingResults({ result, teamName }: { result: RankingResult; teamName:
         <EmptyState
           icon={Trophy}
           title="Nenhuma venda válida no período"
-          description={result.mode === "sellers" && result.scope === "team" && !teamName ? "Você não lidera uma equipe." : "Escolha outro período."}
+          description="Escolha outro período."
         />
       </Card>
     );
@@ -162,11 +156,6 @@ function RankingResults({ result, teamName }: { result: RankingResult; teamName:
   const highlight = result.criterion;
   return (
     <Card className="overflow-hidden p-0">
-      {result.mode === "sellers" && result.scope === "team" && teamName && (
-        <p className="border-b border-slate-100 px-4 py-3 text-sm text-slate-600">
-          Vendas da equipe <strong>{teamName}</strong>
-        </p>
-      )}
       <Table>
         <thead>
           <tr>

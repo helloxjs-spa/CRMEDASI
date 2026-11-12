@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Hourglass, Inbox, Trash2, Users, UserX } from "lucide-react";
+import { Inbox, Trash2, Users, UserX } from "lucide-react";
 import Link from "next/link";
 import { Suspense, type ReactNode } from "react";
 import { Card } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/cn";
 import { courseLabel } from "@/lib/leads";
 import { hasPermission } from "@/server/authz/permissions";
+import { hasCompanyScope } from "@/server/authz/scope";
 import { listCourseFilterOptions } from "@/server/modules/courses/courses.service";
 import { countDecisionQueue, getNegotiationBlock, listLeadSellers } from "@/server/modules/leads/leads.service";
 import { listTeams } from "@/server/modules/teams/teams.service";
@@ -31,19 +32,19 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
   const ctx = await requireServiceContext();
   const { actor } = ctx;
   const canManage = hasPermission(actor, "leads:transfer");
-  const isAdmin = actor.role === "ADMIN";
+  const allTeams = hasCompanyScope(actor);
   const canCreate = hasPermission(actor, "leads:create");
   const creation = leadCreationMode(actor);
 
   const raw = parseLeadsParams(await searchParams);
   // Quem não opera a equipe (SELLER) fica sempre na própria carteira.
   const params: LeadsParams = canManage ? raw : { ...raw, view: "carteira", seller: undefined, team: undefined };
-  const viewer: Viewer = { actor, canManage, isAdmin };
+  const viewer: Viewer = { actor, canManage, allTeams };
 
   const [courses, sellers, teams, queue, block] = await Promise.all([
     listCourseFilterOptions(ctx),
     canManage ? listLeadSellers(ctx) : Promise.resolve([]),
-    isAdmin ? listTeams(ctx) : Promise.resolve([]),
+    allTeams ? listTeams(ctx) : Promise.resolve([]),
     canManage ? countDecisionQueue(ctx) : Promise.resolve(null),
     getNegotiationBlock(ctx),
   ]);
@@ -54,14 +55,14 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
     createdRange: true,
     courses: courses.map((c) => ({ id: c.id, label: `${courseLabel(c)}${c.active ? "" : " (inativo)"}` })),
     sellers: canManage
-      ? sellers.map((s) => ({ id: s.id, label: `${s.name}${isAdmin && s.teamName ? ` — ${s.teamName}` : ""}${s.active ? "" : " (inativo)"}` }))
+      ? sellers.map((s) => ({ id: s.id, label: `${s.name}${allTeams && s.teamName ? ` — ${s.teamName}` : ""}${s.active ? "" : " (inativo)"}` }))
       : undefined,
-    teams: isAdmin ? teams.map((t) => ({ id: t.id, label: `${t.name}${t.active ? "" : " (inativa)"}` })) : undefined,
+    teams: allTeams ? teams.map((t) => ({ id: t.id, label: `${t.name}${t.active ? "" : " (inativa)"}` })) : undefined,
   };
-  const queueTotal = queue ? queue.unassigned + queue.followUp3Expired : 0;
+  const queueTotal = queue ? queue.unassigned : 0;
 
   return (
-    <LeadActionsProvider sellers={sellers} groupByTeam={isAdmin}>
+    <LeadActionsProvider sellers={sellers} groupByTeam={allTeams}>
       <PageHeader
         title="Leads"
         description="Gerencie sua carteira e acompanhe o andamento dos contatos."
@@ -70,7 +71,7 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
             <NewLeadDialog
               courses={courses.filter((c) => c.active)}
               sellers={creation === "chooseSeller" ? sellers.filter((s) => s.active && s.teamId) : undefined}
-              groupByTeam={isAdmin}
+              groupByTeam={allTeams}
             />
           ) : undefined
         }
@@ -94,22 +95,14 @@ export default async function LeadsPage({ searchParams }: PageProps<"/leads">) {
             {queueTotal > 0 && <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">{queueTotal}</span>}
           </Tab>
           <Tab href={leadsHref(params, { view: "lixeira", queue: "todos", page: 1, lead: undefined, stage: undefined })} active={params.view === "lixeira"} icon={Trash2}>
-            Lixeira
+            Perdido (Lixeira)
           </Tab>
         </nav>
       )}
 
       {params.view === "fila" && queue && (
-        <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <div className="mb-4 grid gap-3 sm:grid-cols-2">
           <QueueCard params={params} filter="todos" label="Todos" count={queueTotal} icon={Inbox} hint="Tudo que aguarda decisão" />
-          <QueueCard
-            params={params}
-            filter="follow-up-3"
-            label="Follow-up 3 vencido"
-            count={queue.followUp3Expired}
-            icon={Hourglass}
-            hint="Redistribuir ou enviar para a Lixeira"
-          />
           <QueueCard
             params={params}
             filter="sem-responsavel"

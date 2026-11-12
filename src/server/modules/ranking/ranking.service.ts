@@ -3,7 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { RANKING_CRITERIA, RANKING_VIEWS, rankEntries, type Ranked, type RankingCriterion } from "@/lib/ranking";
 import { assertPermission } from "@/server/authz/permissions";
-import { managedTeamScope } from "@/server/authz/scope";
+import { companyScope, hasCompanyScope } from "@/server/authz/scope";
 import type { ServiceContext } from "@/server/context";
 import { sales, teams, users } from "@/server/db/schema";
 import type { Database } from "@/server/db/types";
@@ -82,7 +82,7 @@ const totals = {
   revenueCents: sql<number>`coalesce(sum(${sales.totalCents}), 0)::bigint`.mapWith(Number),
 };
 
-async function sellerTotals(db: Database, data: RankingInput, teamScope: ReturnType<typeof managedTeamScope>) {
+async function sellerTotals(db: Database, data: RankingInput, teamScope: ReturnType<typeof companyScope>) {
   return db
     .select({ id: sales.sellerId, name: users.name, active: users.active, ...totals })
     .from(sales)
@@ -126,17 +126,15 @@ export async function getRanking({ db, actor }: ServiceContext, input: unknown):
   }
 
   if (data.view === "teams") {
-    return { mode: "teams", criterion, entries: rankEntries(await teamTotals(db, data, actor.role === "ADMIN"), criterion) };
+    return { mode: "teams", criterion, entries: rankEntries(await teamTotals(db, data, hasCompanyScope(actor)), criterion) };
   }
 
-  // ADMIN: sem restrição; SUPERVISOR: vendedores atualmente na equipe que
-  // lidera, com as vendas históricas deles (C50); supervisor sem equipe não vê
-  // vendedores, e vendedor sem equipe não entra no escopo de nenhum supervisor.
-  const scope = managedTeamScope(actor, users.teamId);
+  // ADMIN e SUPERVISOR: todos os vendedores, sem restrição.
+  const scope = companyScope(actor);
   return {
     mode: "sellers",
     criterion,
-    scope: actor.role === "ADMIN" ? "company" : "team",
+    scope: hasCompanyScope(actor) ? "company" : "team",
     entries: rankEntries(await sellerTotals(db, data, scope), criterion),
   };
 }

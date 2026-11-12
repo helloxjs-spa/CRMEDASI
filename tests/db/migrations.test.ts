@@ -318,7 +318,11 @@ describe("integridade garantida pelo banco (defesa em profundidade)", () => {
     await expect(handle.db.delete(auditEvents)).rejects.toThrow();
   });
 
-  it("papel do usuário é imutável", async () => {
+  it("papel do usuário: supervisor que lidera equipe não muda (010)", async () => {
+    await expect(handle.db.update(users).set({ role: "ADMIN" }).where(eq(users.id, org.ids.supA))).rejects.toThrow();
+  });
+
+  it("papel do usuário: quem deixa de ser vendedor sai da equipe na mesma instrução", async () => {
     await expect(handle.db.update(users).set({ role: "ADMIN" }).where(eq(users.id, org.ids.sellerA1))).rejects.toThrow();
   });
 

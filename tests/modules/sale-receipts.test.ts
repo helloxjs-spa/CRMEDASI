@@ -19,7 +19,7 @@ let seq = 0;
 const ctx = (userId: string) => org.ctx(userId);
 const nextPhone = () => `(79) 95${String(++seq).padStart(7, "0")}`;
 const newLead = async (sellerId: string) =>
-  (await createLead(await ctx(sellerId), { name: `Cliente Comprovante ${++seq}`, phone: nextPhone(), interestCourseId: course })).id;
+  (await createLead(await ctx(sellerId), { name: `Cliente Comprovante ${++seq}`, phone: nextPhone(), source: "GOOGLE", interestCourseId: course })).id;
 
 const PDF = new TextEncoder().encode("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n");
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);

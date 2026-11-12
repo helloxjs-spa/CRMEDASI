@@ -23,7 +23,7 @@ const JUL = { month: "2026-07" };
 const NOW = new Date("2026-07-10T15:00:00Z");
 
 async function sale(sellerId: string, saleDate: string, priceCents: number): Promise<string> {
-  const lead = await createLead(await ctx(sellerId), { name: `Cliente Meta ${++seq}`, phone: `(79) 92${String(seq).padStart(7, "0")}`, interestCourseId: course });
+  const lead = await createLead(await ctx(sellerId), { name: `Cliente Meta ${++seq}`, phone: `(79) 92${String(seq).padStart(7, "0")}`, source: "GOOGLE", interestCourseId: course });
   const input = { requestId: crypto.randomUUID(), leadId: lead.id, sellerId, saleDate, paymentMethod: "PIX", items: [{ courseId: course, priceCents }] };
   return (await createSale(await ctx(org.ids.admin), input)).saleId;
 }
@@ -73,10 +73,11 @@ describe("definir meta", () => {
     );
   });
 
-  it("supervisor define só para os vendedores da própria equipe", async () => {
+  it("supervisor define para vendedores de qualquer equipe, nunca para quem não é vendedor", async () => {
     const supA = await ctx(org.ids.supA);
     await setSellerGoal(supA, { sellerId: org.ids.sellerA1, month: "2026-07", targetCents: 600_000 });
-    await expect(setSellerGoal(supA, { sellerId: org.ids.sellerB1, month: "2026-07", targetCents: 1 })).rejects.toBeInstanceOf(NotFoundError);
+    // Outra equipe: permitido (o teste seguinte grava o valor final de B1).
+    await setSellerGoal(supA, { sellerId: org.ids.sellerB1, month: "2026-07", targetCents: 1 });
     await expect(setSellerGoal(supA, { sellerId: org.ids.supB, month: "2026-07", targetCents: 1 })).rejects.toBeInstanceOf(NotFoundError);
   });
 
@@ -93,7 +94,7 @@ describe("definir meta", () => {
     const edit = async (who: "admin" | "supA" | "sellerA1") =>
       Object.fromEntries((await getMonthlyGoals(await ctx(org.ids[who]), JUL, NOW)).sellers.map((s) => [s.name, s.canEdit]));
     expect(await edit("admin")).toEqual({ "Vendedor A1": true, "Vendedor A2": true, "Vendedor B1": true });
-    expect(await edit("supA")).toEqual({ "Vendedor A1": true, "Vendedor A2": true, "Vendedor B1": false });
+    expect(await edit("supA")).toEqual({ "Vendedor A1": true, "Vendedor A2": true, "Vendedor B1": true });
     expect(await edit("sellerA1")).toEqual({ "Vendedor A1": false, "Vendedor A2": false, "Vendedor B1": false });
   });
 

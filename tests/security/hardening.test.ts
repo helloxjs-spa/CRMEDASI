@@ -6,20 +6,25 @@ import path from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { toCsv } from "@/lib/csv";
-import { changeOwnPassword, login, LOGIN_RATE_LIMITED } from "@/server/auth/auth.service";
-import { edgeLimitExceeded } from "@/server/auth/edge-rate-limit";
+import { login } from "@/server/auth/auth.service";
 import { isCommonPassword } from "@/server/auth/password-policy";
-import { accountBucket, hitBuckets, ipBucketValue, LOGIN_LIMITS, pruneBuckets } from "@/server/auth/rate-limit";
-import { ACTOR_PASSWORD_REQUIRED, REAUTH_LOCKED } from "@/server/auth/reauth";
 import { safeNextPath } from "@/server/auth/safe-next-path";
 import type { DatabaseHandle } from "@/server/db/connect";
 import { safeErrorSummary } from "@/server/db/safe-errors";
-import { auditEvents, rateLimitBuckets, users } from "@/server/db/schema";
-import { createLead, editLead, PHONE_LOOKUP_LIMITED } from "@/server/modules/leads/leads.service";
+import { auditEvents, users } from "@/server/db/schema";
+import { createLead } from "@/server/modules/leads/leads.service";
 import { getSaleInstallments, listInstallments, markInstallmentPaid } from "@/server/modules/installments/installments.service";
 import { buildReport } from "@/server/modules/reports/reports.service";
 import { COMMISSION_EXCEEDS_TOTAL, createSale, getSale, updateSale } from "@/server/modules/sales/sales.service";
-import { createUser, resetUserPassword, SELF_RESET_FORBIDDEN, setUserActive, updateUser } from "@/server/modules/users/users.service";
+import {
+  ADMIN_ACCOUNT_FORBIDDEN,
+  changeUserRole,
+  createUser,
+  resetUserPassword,
+  SELF_RESET_FORBIDDEN,
+  setUserActive,
+  updateUser,
+} from "@/server/modules/users/users.service";
 import { toErrorState } from "@/server/next/action";
 import { passwordSchema } from "@/server/validation";
 import { createTestDatabase, seedOrganization, TEST_PASSWORD, insertUser } from "../support/db";
@@ -41,76 +46,7 @@ beforeAll(async () => {
 }, 120_000);
 afterAll(() => handle.close());
 
-describe("SEC-01: limite de login compartilhado", () => {
-  const wrong = (email: string, ipAddress: string | null) => login(handle.db, { email, password: "senha-errada" }, { ipAddress });
-
-  it("trocar de IP não zera o limite da conta, e a chave não guarda e-mail nem IP", async () => {
-    const email = "alvo.distribuido@teste.local";
-    for (let i = 0; i < LOGIN_LIMITS.account; i++) await expect(wrong(email, `203.0.113.${i + 1}`)).rejects.toThrow("E-mail ou senha inválidos.");
-    await expect(wrong(email, "198.51.100.200")).rejects.toThrow(LOGIN_RATE_LIMITED);
-    const keys = await handle.db.select({ key: rateLimitBuckets.key }).from(rateLimitBuckets);
-    expect(keys.every((row) => /^[0-9a-f]{64}$/.test(row.key))).toBe(true);
-  }, 120_000);
-
-  it("o contador é do banco: uma nova instância (sem memória) vê o mesmo total", async () => {
-    const bucket = { key: "teste:instancias", limit: 2 };
-    await hitBuckets(handle.db, [bucket]);
-    expect((await hitBuckets(handle.db, [bucket])).get(bucket.key)).toBe(2);
-    expect((await hitBuckets(handle.db, [bucket])).get(bucket.key)).toBe(3);
-  });
-
-  it("origem bloqueada não consome o limite da conta (uma só origem não trava o usuário)", async () => {
-    const email = "vendedor.a2@teste.local";
-    const ip = "198.51.100.77";
-    for (let i = 0; i < LOGIN_LIMITS.pair + 15; i++) await wrong(email, ip).catch(() => undefined);
-    await expect(login(handle.db, { email, password: TEST_PASSWORD }, { ipAddress: "198.51.100.78" })).resolves.toHaveProperty("token");
-  }, 120_000);
-
-  it("o bloqueio vence sozinho e linhas vencidas são apagadas", async () => {
-    const email = "alvo.expira@teste.local";
-    const bucket = accountBucket(email);
-    for (let i = 0; i <= bucket.limit; i++) await hitBuckets(handle.db, [bucket]);
-    await expect(wrong(email, "192.0.2.10")).rejects.toThrow(LOGIN_RATE_LIMITED);
-    await handle.db.update(rateLimitBuckets).set({ windowStartedAt: sql`now() - interval '16 minutes'` });
-    await expect(wrong(email, "192.0.2.10")).rejects.toThrow("E-mail ou senha inválidos.");
-    await handle.db.update(rateLimitBuckets).set({ windowStartedAt: sql`now() - interval '16 minutes'` });
-    await pruneBuckets(handle.db);
-    expect(await handle.db.select().from(rateLimitBuckets)).toEqual([]);
-  });
-
-  it("IPv6 conta por /64; IPv4 e IPv4 mapeado ficam iguais", () => {
-    expect(ipBucketValue("2001:db8:1:2:aaaa::1")).toBe(ipBucketValue("2001:db8:1:2:bbbb:cccc:dddd:eeee"));
-    expect(ipBucketValue("2001:db8:1:2::1")).not.toBe(ipBucketValue("2001:db8:1:3::1"));
-    expect(ipBucketValue("::ffff:203.0.113.9")).toBe("203.0.113.9");
-    expect(ipBucketValue("203.0.113.9")).toBe("203.0.113.9");
-  });
-
-  it("falhas com e-mails aleatórios não geram uma linha de auditoria por tentativa", async () => {
-    await handle.db.delete(rateLimitBuckets);
-    await handle.db.insert(rateLimitBuckets).values({ key: (await import("node:crypto")).createHash("sha256").update("login:volume").digest("hex"), attempts: 500 });
-    const before = await auditCount("auth.login_failed");
-    for (let i = 0; i < 3; i++) await expect(wrong(`aleatorio${i}@teste.local`, "192.0.2.20")).rejects.toThrow("E-mail ou senha inválidos.");
-    expect(await auditCount("auth.login_failed")).toBe(before);
-    await handle.db.delete(rateLimitBuckets);
-  });
-
-  it("conta conhecida: só as primeiras falhas da janela são auditadas", async () => {
-    await handle.db.delete(rateLimitBuckets);
-    const email = "vendedor.b1@teste.local";
-    const before = await auditCount("auth.login_failed");
-    for (let i = 0; i < 6; i++) await wrong(email, `192.0.2.${30 + i}`).catch(() => undefined);
-    expect((await auditCount("auth.login_failed")) - before).toBe(3);
-  }, 60_000);
-
-  it("binding da Cloudflare: bloqueia pelo IP normalizado e não derruba o login se falhar", async () => {
-    const limit = vi.fn(async () => ({ success: false }));
-    await expect(edgeLimitExceeded({ limit }, "2001:db8:1:2::9")).resolves.toBe(true);
-    expect(limit).toHaveBeenCalledWith({ key: ipBucketValue("2001:db8:1:2::9") });
-    await expect(edgeLimitExceeded({ limit }, null)).resolves.toBe(false);
-    await expect(edgeLimitExceeded(undefined, "203.0.113.1")).resolves.toBe(false);
-    await expect(edgeLimitExceeded({ limit: async () => { throw new Error("indisponível"); } }, "203.0.113.1")).resolves.toBe(false);
-  });
-
+describe("SEC-01: política de senha", () => {
   it("política de senha: 12 caracteres e sem senhas comuns", () => {
     for (const weak of ["curta123", "12345678901", "123456789012", "qwertyuiopas", "Senha@2026123", "Admin1234567", "aaaaaaaaaaaaaa", "abcdabcdabcd", "administrador", "edasi1234567", "Senha Senha!"]) {
       expect(passwordSchema.safeParse(weak).success, weak).toBe(false);
@@ -174,7 +110,7 @@ describe("SEC-11: login concorrente com redefinição de senha", () => {
         if (property === "transaction" && !raced) {
           raced = true;
           return async (...args: Parameters<typeof realTransaction>) => {
-            await resetUserPassword(admin, userId, { password: "senha-nova-do-reset", actorPassword: TEST_PASSWORD });
+            await resetUserPassword(admin, userId, { password: "senha-nova-do-reset" });
             return realTransaction(...args);
           };
         }
@@ -212,7 +148,7 @@ describe("SEC-11: login concorrente com redefinição de senha", () => {
 describe("SEC-02: comissão não passa do valor da venda (SELLER)", () => {
   // Comissão de teste por item: R$ 100,00.
   const items = (count: number, priceCents: number) => Array.from({ length: count }, () => ({ courseId: course, priceCents }));
-  const newLead = async (userId: string) => (await createLead(await org.ctx(userId), { name: "Lead Comissao", phone: phone(), interestCourseId: course })).id;
+  const newLead = async (userId: string) => (await createLead(await org.ctx(userId), { name: "Lead Comissao", phone: phone(), source: "GOOGLE", interestCourseId: course })).id;
 
   it("SELLER: recusa 100 itens a R$ 0,01 e nada é gravado; aceita comissão igual ao total", async () => {
     const seller = await org.ctx(org.ids.sellerA1);
@@ -250,21 +186,20 @@ describe("SEC-02: comissão não passa do valor da venda (SELLER)", () => {
 });
 
 describe("SEC-05: baixa de parcelas", () => {
-  it("vendedor consulta, mas não confirma; supervisor confirma, uma vez, com auditoria", async () => {
+  it("vendedor consulta, mas não confirma; qualquer supervisor confirma, uma vez, com auditoria", async () => {
     const seller = await org.ctx(org.ids.sellerA1);
-    const lead = await createLead(seller, { name: "Lead Parcela", phone: phone(), interestCourseId: course });
+    const lead = await createLead(seller, { name: "Lead Parcela", phone: phone(), source: "GOOGLE", interestCourseId: course });
     const { saleId } = await createSale(seller, saleInput(lead.id, course, { paymentMethod: "CARD", installmentCount: 2 }));
     const [first] = await getSaleInstallments(seller, saleId);
     expect((await listInstallments(seller, {})).total).toBeGreaterThan(0);
 
     await expect(markInstallmentPaid(seller, { installmentId: first.id })).rejects.toThrow("permissão");
-    const supervisorB = await org.ctx(org.ids.supB);
-    await expect(markInstallmentPaid(supervisorB, { installmentId: first.id })).rejects.toThrow("Registro não encontrado");
 
+    // Supervisor de outra equipe: escopo da empresa (decisão de 2026-11-06).
     const before = await auditCount("installment.paid");
-    const supervisorA = await org.ctx(org.ids.supA);
-    await markInstallmentPaid(supervisorA, { installmentId: first.id });
-    await expect(markInstallmentPaid(supervisorA, { installmentId: first.id })).rejects.toThrow("já está paga");
+    const supervisorB = await org.ctx(org.ids.supB);
+    await markInstallmentPaid(supervisorB, { installmentId: first.id });
+    await expect(markInstallmentPaid(await org.ctx(org.ids.supA), { installmentId: first.id })).rejects.toThrow("já está paga");
     expect((await auditCount("installment.paid")) - before).toBe(1);
     expect((await getSaleInstallments(seller, saleId))[0].status).toBe("PAID");
   }, 60_000);
@@ -274,7 +209,7 @@ describe("SEC-04: auditoria de exportações", () => {
   it("uma exportação gera um evento, com tipo, filtros e quantidade, sem dados pessoais", async () => {
     const seller = await org.ctx(org.ids.sellerA1);
     const leadPhone = phone();
-    await createLead(seller, { name: "Maria Sensivel", phone: leadPhone, interestCourseId: course });
+    await createLead(seller, { name: "Maria Sensivel", phone: leadPhone, source: "GOOGLE", interestCourseId: course });
     const supervisor = await org.ctx(org.ids.supA);
     const before = await auditCount("report.exported");
     const report = await buildReport(supervisor, "leads", { status: "ACTIVE", dateFrom: "2020-01-01" });
@@ -295,7 +230,7 @@ describe("SEC-04: auditoria de exportações", () => {
   });
 });
 
-describe("SEC-06: reautenticação do ADMIN", () => {
+describe("SEC-06: contas ADMIN", () => {
   let victimId: string;
   let otherAdmin: string;
   beforeAll(async () => {
@@ -304,53 +239,37 @@ describe("SEC-06: reautenticação do ADMIN", () => {
   });
   const newPassword = "senha-nova-administrativa";
 
-  it("redefinir senha exige a senha de quem executa", async () => {
-    const admin = await org.ctx(org.ids.admin);
-    await expect(resetUserPassword(admin, victimId, { password: newPassword })).rejects.toThrow(ACTOR_PASSWORD_REQUIRED);
-    await expect(resetUserPassword(admin, victimId, { password: newPassword, actorPassword: "palpite-errado" })).rejects.toThrow("Sua senha está incorreta.");
-    expect(await auditCount("auth.reauth_failed")).toBeGreaterThan(0);
-    await resetUserPassword(admin, victimId, { password: newPassword, actorPassword: TEST_PASSWORD });
-    expect(await auditCount("user.password_reset")).toBeGreaterThan(0);
-  }, 60_000);
-
   it("o fluxo administrativo não redefine a própria senha", async () => {
     const admin = await org.ctx(org.ids.admin);
-    await expect(resetUserPassword(admin, org.ids.admin, { password: newPassword, actorPassword: TEST_PASSWORD })).rejects.toThrow(SELF_RESET_FORBIDDEN);
+    await expect(resetUserPassword(admin, org.ids.admin, { password: newPassword })).rejects.toThrow(SELF_RESET_FORBIDDEN);
   });
 
-  it("trocar e-mail exige reautenticação e fica auditado; trocar só o nome, não", async () => {
+  it("redefinir senha e trocar e-mail ficam auditados", async () => {
     const admin = await org.ctx(org.ids.admin);
-    await expect(updateUser(admin, victimId, { email: "novo.alvo@teste.local" })).rejects.toThrow(ACTOR_PASSWORD_REQUIRED);
-    await updateUser(admin, victimId, { name: "Conta Alvo Renomeada" });
-    await updateUser(admin, victimId, { email: "novo.alvo@teste.local", actorPassword: TEST_PASSWORD });
+    await resetUserPassword(admin, victimId, { password: newPassword });
+    expect(await auditCount("user.password_reset")).toBeGreaterThan(0);
+    await updateUser(admin, victimId, { email: "novo.alvo@teste.local" });
     const [event] = await handle.db.select().from(auditEvents).where(eq(auditEvents.action, "user.updated")).orderBy(sql`${auditEvents.id} desc`).limit(1);
     expect((event.metadata as { changes: { email: unknown } }).changes.email).toEqual({ from: "conta.alvo@teste.local", to: "novo.alvo@teste.local" });
   }, 60_000);
 
-  it("criar ADMIN e desativar ADMIN exigem reautenticação; vendedor não", async () => {
-    const admin = await org.ctx(org.ids.admin);
-    const input = { name: "Novo Admin", email: "novo.admin@teste.local", password: newPassword, role: "ADMIN" };
-    await expect(createUser(admin, input)).rejects.toThrow(ACTOR_PASSWORD_REQUIRED);
-    await createUser(admin, { ...input, actorPassword: TEST_PASSWORD });
-    await expect(setUserActive(admin, otherAdmin, false)).rejects.toThrow(ACTOR_PASSWORD_REQUIRED);
-    await setUserActive(admin, otherAdmin, false, TEST_PASSWORD);
-    await setUserActive(admin, otherAdmin, true, TEST_PASSWORD);
-    await setUserActive(admin, victimId, false);
-    await setUserActive(admin, victimId, true);
-  }, 60_000);
-
-  it("a confirmação de senha não serve para adivinhar a senha, inclusive na tela de Perfil", async () => {
-    const id = await insertUser(handle, { name: "Admin Sessao Roubada", role: "ADMIN", email: "sessao.roubada@teste.local" });
-    const stolen = await org.ctx(id);
-    for (let i = 0; i < 5; i++) {
-      await expect(changeOwnPassword(stolen, { currentPassword: `palpite-${i}`, newPassword, confirmPassword: newPassword })).rejects.toThrow("Senha atual incorreta.");
-    }
-    await expect(changeOwnPassword(stolen, { currentPassword: TEST_PASSWORD, newPassword, confirmPassword: newPassword })).rejects.toThrow(REAUTH_LOCKED);
-  }, 60_000);
-
-  it("SUPERVISOR continua sem acesso a essas operações", async () => {
+  it("SUPERVISOR não cria nem altera conta ADMIN (senão entraria como ele)", async () => {
     const supervisor = await org.ctx(org.ids.supA);
-    await expect(resetUserPassword(supervisor, victimId, { password: newPassword, actorPassword: TEST_PASSWORD })).rejects.toThrow("permissão");
+    const asAdmin = ADMIN_ACCOUNT_FORBIDDEN;
+    await expect(resetUserPassword(supervisor, otherAdmin, { password: newPassword })).rejects.toThrow(asAdmin);
+    await expect(updateUser(supervisor, otherAdmin, { email: "tomada@teste.local" })).rejects.toThrow(asAdmin);
+    await expect(updateUser(supervisor, otherAdmin, { name: "Outro nome" })).rejects.toThrow(asAdmin);
+    await expect(setUserActive(supervisor, otherAdmin, false)).rejects.toThrow(asAdmin);
+    await expect(createUser(supervisor, { name: "Admin Novo", email: "admin.novo@teste.local", password: newPassword, role: "ADMIN" })).rejects.toThrow(asAdmin);
+    await expect(changeUserRole(supervisor, victimId, { role: "ADMIN" })).rejects.toThrow("permissão");
+    const [row] = await handle.db.select().from(users).where(eq(users.id, otherAdmin));
+    expect(row).toMatchObject({ role: "ADMIN", active: true, email: "outro.admin@teste.local", name: "Outro Admin" });
+    expect((await handle.db.select().from(users).where(eq(users.id, victimId)))[0].role).toBe("SELLER");
+  });
+
+  it("SUPERVISOR gerencia contas que não são ADMIN", async () => {
+    const supervisor = await org.ctx(org.ids.supA);
+    await resetUserPassword(supervisor, victimId, { password: newPassword });
   });
 });
 
@@ -404,31 +323,6 @@ describe("SEC-13: CSV", () => {
     expect(cells("＝1+1")).toBe("'＝1+1");
     expect(cells("Administração, Direito")).toBe(`"Administração, Direito"`);
   });
-});
-
-describe("SEC-14: sondagem de telefones", () => {
-  it("após o limite, o vendedor não consulta mais telefones; outro vendedor segue normal", async () => {
-    await handle.db.delete(rateLimitBuckets);
-    const owner = await org.ctx(org.ids.sellerB1);
-    const taken = phone();
-    await createLead(owner, { name: "Lead Disputado", phone: taken, interestCourseId: course });
-    const prober = await org.ctx(org.ids.sellerA2);
-    for (let i = 0; i < 20; i++) {
-      await expect(createLead(prober, { name: "Sonda", phone: taken, interestCourseId: course })).rejects.toThrow("já está cadastrado");
-    }
-    await expect(createLead(prober, { name: "Sonda", phone: taken, interestCourseId: course })).rejects.toThrow(PHONE_LOOKUP_LIMITED);
-    await expect(createLead(prober, { name: "Sonda", phone: phone(), interestCourseId: course })).rejects.toThrow(PHONE_LOOKUP_LIMITED);
-
-    // Editar sem mudar o telefone continua possível.
-    await handle.db.delete(rateLimitBuckets);
-    const own = await createLead(prober, { name: "Lead Proprio", phone: phone(), interestCourseId: course });
-    for (let i = 0; i < 20; i++) await expect(editLead(prober, own.id, { phone: taken })).rejects.toThrow("já pertence");
-    await expect(editLead(prober, own.id, { phone: taken })).rejects.toThrow(PHONE_LOOKUP_LIMITED);
-    await expect(editLead(prober, own.id, { name: "Nome Alterado" })).resolves.toHaveProperty("name", "Nome Alterado");
-
-    const other = await org.ctx(org.ids.sellerA1);
-    await expect(createLead(other, { name: "Outro", phone: taken, interestCourseId: course })).rejects.toThrow("já está cadastrado");
-  }, 120_000);
 });
 
 describe("SEC-08: guarda do build", () => {

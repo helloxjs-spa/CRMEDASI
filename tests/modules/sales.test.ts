@@ -43,7 +43,7 @@ const nextPhone = () => `(79) 95${String(++seq).padStart(7, "0")}`;
 const ctx = (userId: string) => org.ctx(userId);
 
 async function newLead(sellerId: string = org.ids.sellerA1): Promise<string> {
-  return (await createLead(await ctx(sellerId), { name: `Cliente ${seq}`, phone: nextPhone(), interestCourseId: course })).id;
+  return (await createLead(await ctx(sellerId), { name: `Cliente ${seq}`, phone: nextPhone(), source: "GOOGLE", interestCourseId: course })).id;
 }
 
 const leadRow = async (id: string) => (await handle.db.select().from(leads).where(eq(leads.id, id)))[0];
@@ -312,26 +312,28 @@ describe("autorização e escolha do responsável", () => {
     });
   });
 
-  it("SUPERVISOR e ADMIN precisam escolher o vendedor; só o ADMIN informa a data", async () => {
+  it("SUPERVISOR e ADMIN precisam escolher o vendedor; ADMIN e SUPERVISOR informam a data, o vendedor não", async () => {
     const leadId = await newLead();
     await expectValidation(createSale(await ctx(org.ids.supA), saleInput(leadId, course)), SELLER_REQUIRED);
-    await expect(
-      createSale(await ctx(org.ids.supA), saleInput(leadId, course, { sellerId: org.ids.sellerA1, saleDate: "2026-01-15" })),
-    ).rejects.toBeInstanceOf(ForbiddenError);
     await expect(createSale(await ctx(org.ids.sellerA1), saleInput(leadId, course, { saleDate: "2026-01-15" }))).rejects.toBeInstanceOf(
       ForbiddenError,
     );
 
     const { saleId } = await createSale(await ctx(org.ids.admin), saleInput(leadId, course, { sellerId: org.ids.sellerA2, saleDate: "2026-01-15" }));
     expect(await saleRow(saleId)).toMatchObject({ sellerId: org.ids.sellerA2, saleDate: "2026-01-15", createdBy: org.ids.admin });
+
+    const bySupervisor = await createSale(
+      await ctx(org.ids.supA),
+      saleInput(await newLead(), course, { sellerId: org.ids.sellerA1, saleDate: "2026-01-16" }),
+    );
+    expect(await saleRow(bySupervisor.saleId)).toMatchObject({ saleDate: "2026-01-16", createdBy: org.ids.supA });
   });
 
-  it("lead fora do escopo → NotFound, para vendedor e supervisor", async () => {
+  it("lead fora do escopo → NotFound para o vendedor; o supervisor registra em lead de qualquer equipe", async () => {
     const leadId = await newLead(org.ids.sellerA1);
     await expect(createSale(await ctx(org.ids.sellerB1), saleInput(leadId, course))).rejects.toBeInstanceOf(NotFoundError);
-    await expect(createSale(await ctx(org.ids.supB), saleInput(leadId, course, { sellerId: org.ids.sellerB1 }))).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
+    const { saleId } = await createSale(await ctx(org.ids.supB), saleInput(leadId, course, { sellerId: org.ids.sellerA1 }));
+    expect(await saleRow(saleId)).toMatchObject({ sellerId: org.ids.sellerA1, createdBy: org.ids.supB });
   });
 
   it("ator desativado depois de carregar a sessão → sessão encerrada, nada gravado", async () => {
@@ -367,15 +369,15 @@ describe("consultas e informações sensíveis", () => {
     expect((await listSales(seller, { teamId: org.ids.teamA })).total).toBe(0);
   });
 
-  it("SUPERVISOR vê vendas dos vendedores que estão HOJE na equipe dele (não a equipe histórica)", async () => {
+  it("SUPERVISOR vê vendas de todas as equipes; o filtro de equipe usa a equipe ATUAL do vendedor (C50)", async () => {
     const mover = await insertUser(handle, { name: "Vendedor Que Muda", role: "SELLER", teamId: org.ids.teamA });
     const { saleId } = await createSale(await ctx(mover), saleInput(await newLead(mover), course));
     expect((await getSale(await ctx(org.ids.supA), saleId)).teamId).toBe(org.ids.teamA);
 
     await changeSellerTeam(await ctx(org.ids.admin), mover, { teamId: org.ids.teamB });
 
-    await expect(getSale(await ctx(org.ids.supA), saleId)).rejects.toBeInstanceOf(NotFoundError);
-    expect((await listSales(await ctx(org.ids.supA), { sellerId: mover })).total).toBe(0);
+    expect((await getSale(await ctx(org.ids.supA), saleId)).id).toBe(saleId);
+    expect((await listSales(await ctx(org.ids.supA), { sellerId: mover })).items.map((s) => s.id)).toEqual([saleId]);
     const forB = await getSale(await ctx(org.ids.supB), saleId);
     expect(forB.teamId).toBe(org.ids.teamA); // atribuição histórica preservada
     expect((await listSales(await ctx(org.ids.supB), { sellerId: mover })).items.map((s) => s.id)).toEqual([saleId]);
@@ -393,10 +395,10 @@ describe("consultas e informações sensíveis", () => {
     expect(all.items.length).toBe(Math.min(25, total));
   });
 
-  it("custos de bolsa nunca saem para vendedor e supervisor (detalhe, histórico e linha do tempo do lead)", async () => {
+  it("custos de bolsa nunca saem para o vendedor (detalhe, histórico e linha do tempo do lead); ADMIN e SUPERVISOR veem", async () => {
     const leadId = await newLead(org.ids.sellerA1);
     const { saleId } = await createSale(await ctx(org.ids.sellerA1), saleInput(leadId, course));
-    for (const userId of [org.ids.sellerA1, org.ids.supA]) {
+    for (const userId of [org.ids.sellerA1]) {
       const viewer = await ctx(userId);
       const payload = JSON.stringify([
         await getSale(viewer, saleId),
@@ -409,18 +411,19 @@ describe("consultas e informações sensíveis", () => {
       expect(payload).not.toMatch(/txid|tx_base|txBase/i);
       await expect(getSaleWithCost(viewer, saleId)).rejects.toBeInstanceOf(ForbiddenError);
     }
-    const admin = await ctx(org.ids.admin);
-    const withCost = await getSaleWithCost(admin, saleId);
-    expect(withCost.items.map((i) => i.costSnapshotCents)).toEqual([40_000]);
-    expect(withCost.costTotalCents).toBe(40_000);
-    expect(JSON.stringify(await getSaleHistory(admin, saleId))).toContain("costSnapshotCents");
+    for (const userId of [org.ids.admin, org.ids.supB]) {
+      const viewer = await ctx(userId);
+      const withCost = await getSaleWithCost(viewer, saleId);
+      expect(withCost.items.map((i) => i.costSnapshotCents)).toEqual([40_000]);
+      expect(withCost.costTotalCents).toBe(40_000);
+      expect(JSON.stringify(await getSaleHistory(viewer, saleId))).toContain("costSnapshotCents");
+    }
   });
 
   it("venda inexistente ou fora do escopo → NotFound", async () => {
     const { saleId } = await createSale(await ctx(org.ids.sellerA1), saleInput(await newLead(org.ids.sellerA1), course));
     await expect(getSale(await ctx(org.ids.sellerB1), saleId)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(getSale(await ctx(org.ids.supB), saleId)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(getSaleHistory(await ctx(org.ids.supB), saleId)).rejects.toBeInstanceOf(NotFoundError);
+    expect((await getSale(await ctx(org.ids.supB), saleId)).id).toBe(saleId);
     await expect(getSale(await ctx(org.ids.admin), "00000000-0000-4000-8000-0000000000aa")).rejects.toBeInstanceOf(NotFoundError);
   });
 });

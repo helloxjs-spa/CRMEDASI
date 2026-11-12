@@ -1,4 +1,4 @@
-import { AlertTriangle, Clock, Hourglass, UserX } from "lucide-react";
+import { AlertTriangle, Clock, UserX } from "lucide-react";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { formatRelativeDateTime } from "@/lib/format";
 import { deadlineInfo, QUEUE_REASON_LABELS, STAGE_LABELS, type LeadQueueReason } from "@/lib/leads";
@@ -21,8 +21,8 @@ export function StageBadge({ stage }: { stage: LeadStage }) {
 
 export function QueueReasonBadge({ reason }: { reason: LeadQueueReason }) {
   return (
-    <Badge tone={reason === "UNASSIGNED" ? "warning" : "brand"} className="gap-1">
-      {reason === "UNASSIGNED" ? <UserX className="size-3" aria-hidden /> : <Hourglass className="size-3" aria-hidden />}
+    <Badge tone="warning" className="gap-1">
+      <UserX className="size-3" aria-hidden />
       {QUEUE_REASON_LABELS[reason]}
     </Badge>
   );
@@ -41,13 +41,6 @@ export function DeadlineBadge({ lead, now, withDetail = true }: { lead: Deadline
         <Badge tone="warning" className="gap-1">
           <UserX className="size-3" aria-hidden />
           Sem responsável
-        </Badge>
-      );
-    case "awaiting_supervisor":
-      return (
-        <Badge tone="brand" className="gap-1">
-          <Hourglass className="size-3" aria-hidden />
-          Aguardando supervisor
         </Badge>
       );
     case "overdue":

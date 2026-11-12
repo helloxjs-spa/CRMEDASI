@@ -12,7 +12,7 @@ import {
   setUserActive,
   updateUser,
 } from "@/server/modules/users/users.service";
-import { createTestDatabase, seedOrganization, TEST_PASSWORD } from "../support/db";
+import { createTestDatabase, seedOrganization } from "../support/db";
 
 let handle: DatabaseHandle;
 let org: Awaited<ReturnType<typeof seedOrganization>>;
@@ -49,37 +49,36 @@ describe("vendedor não acessa recursos de outro vendedor", () => {
   });
 });
 
-describe("supervisor não acessa outra equipe", () => {
-  it("lista apenas os vendedores da própria equipe", async () => {
+describe("supervisor vê e gerencia usuários de todas as equipes", () => {
+  it("lista todos os usuários, inclusive de outra equipe e administradores", async () => {
     const list = await listUsers(await org.ctx(org.ids.supA));
-    expect(list.map((u) => u.id).sort()).toEqual([org.ids.sellerA1, org.ids.sellerA2].sort());
+    expect(list).toHaveLength(6);
+    expect((await listUsers(await org.ctx(org.ids.supA), { teamId: org.ids.teamB })).map((u) => u.id)).toEqual([org.ids.sellerB1]);
   });
 
-  it("filtro por outra equipe não fura o escopo", async () => {
-    const list = await listUsers(await org.ctx(org.ids.supA), { teamId: org.ids.teamB });
-    expect(list).toEqual([]);
-  });
-
-  it("vê vendedores da própria equipe e recebe NotFound para os de outra", async () => {
+  it("consulta qualquer usuário pelo ID", async () => {
     const ctx = await org.ctx(org.ids.supA);
-    await expect(getUser(ctx, org.ids.sellerA1)).resolves.toMatchObject({ id: org.ids.sellerA1 });
-    await expect(getUser(ctx, org.ids.sellerB1)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(getUser(ctx, org.ids.supB)).rejects.toBeInstanceOf(NotFoundError);
+    for (const id of [org.ids.sellerA1, org.ids.sellerB1, org.ids.supB, org.ids.admin]) {
+      await expect(getUser(ctx, id)).resolves.toMatchObject({ id });
+    }
   });
 
-  it("não cria usuários nem move vendedores", async () => {
+  it("cria vendedor e move vendedor de outra equipe, mas não cria ADMIN", async () => {
     const ctx = await org.ctx(org.ids.supA);
+    const created = await createUser(ctx, { name: "Novo", email: "novo@teste.local", password: "senha-longa-e-valida", role: "SELLER", teamId: org.ids.teamB });
+    await changeSellerTeam(ctx, created.id, { teamId: org.ids.teamA });
+    expect((await getUser(ctx, created.id)).teamId).toBe(org.ids.teamA);
+    await setUserActive(ctx, created.id, false);
     await expect(
-      createUser(ctx, { name: "Novo", email: "novo@teste.local", password: "senha-longa-e-valida", role: "SELLER", teamId: org.ids.teamA }),
+      createUser(ctx, { name: "Admin X", email: "admin.x@teste.local", password: "senha-longa-e-valida", role: "ADMIN" }),
     ).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(changeSellerTeam(ctx, org.ids.sellerB1, { teamId: org.ids.teamA })).rejects.toBeInstanceOf(ForbiddenError);
   });
 });
 
 describe("administrador", () => {
   it("lista todos os usuários sem expor hash de senha", async () => {
     const list = await listUsers(await org.ctx(org.ids.admin));
-    expect(list).toHaveLength(6);
+    expect(list).toHaveLength(7); // 6 da organização + o vendedor criado pelo supervisor acima
     for (const user of list) expect(user).not.toHaveProperty("passwordHash");
   });
 
@@ -101,7 +100,7 @@ describe("administrador", () => {
 
   it("bloqueia e-mail duplicado", async () => {
     await expect(
-      createUser(await org.ctx(org.ids.admin), { name: "Outro", email: "admin@teste.local", password: "senha-longa-e-valida", role: "ADMIN", actorPassword: TEST_PASSWORD }),
+      createUser(await org.ctx(org.ids.admin), { name: "Outro", email: "admin@teste.local", password: "senha-longa-e-valida", role: "ADMIN" }),
     ).rejects.toBeInstanceOf(ConflictError);
   });
 
@@ -136,9 +135,6 @@ describe("administrador", () => {
       movedLeads: 0,
     });
 
-    // O escopo do supervisor acompanha a mudança imediatamente.
-    await expect(getUser(await org.ctx(org.ids.supA), org.ids.sellerB1)).resolves.toBeTruthy();
-    await expect(getUser(await org.ctx(org.ids.supB), org.ids.sellerB1)).rejects.toBeInstanceOf(NotFoundError);
     await changeSellerTeam(ctx, org.ids.sellerB1, { teamId: org.ids.teamB });
   });
 

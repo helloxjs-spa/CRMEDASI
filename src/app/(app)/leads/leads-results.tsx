@@ -18,7 +18,7 @@ import { LeadAdminActions, type LeadActionTarget } from "./lead-actions";
 import { leadActionsFor } from "./policy";
 import { hasResultFilters, leadsHref, toListFilters, type LeadsParams } from "./search-params";
 
-export type Viewer = { actor: Actor; canManage: boolean; isAdmin: boolean };
+export type Viewer = { actor: Actor; canManage: boolean; allTeams: boolean };
 
 /** Só o que o menu de ações precisa (o resto do lead não vai para o cliente). */
 export function actionTarget(l: LeadView): LeadActionTarget {
@@ -78,7 +78,7 @@ function columnsFor(view: LeadsParams["view"], viewer: Viewer, now: Date): Colum
       stage,
       { key: "reason", header: "Motivo", cell: (l) => (l.queueReason ? <QueueReasonBadge reason={l.queueReason} /> : null) },
       owner,
-      ...(viewer.isAdmin ? [team] : []),
+      ...(viewer.allTeams ? [team] : []),
       {
         key: "since",
         header: "Desde",
@@ -90,12 +90,12 @@ function columnsFor(view: LeadsParams["view"], viewer: Viewer, now: Date): Colum
       },
     ];
   }
-  return [lead, phone, course, stage, ...(viewer.canManage ? [owner] : []), ...(viewer.isAdmin ? [team] : []), deadline, created];
+  return [lead, phone, course, stage, ...(viewer.canManage ? [owner] : []), ...(viewer.allTeams ? [team] : []), deadline, created];
 }
 
 /** Resultado paginado (consulta no banco já com escopo, filtros, LIMIT/OFFSET). */
 export async function LeadsResults({ ctx, params, viewer }: { ctx: ServiceContext; params: LeadsParams; viewer: Viewer }) {
-  const result = await listLeads(ctx, toListFilters(params, { canManage: viewer.canManage, canFilterTeam: viewer.isAdmin }));
+  const result = await listLeads(ctx, toListFilters(params, { canManage: viewer.canManage, canFilterTeam: viewer.allTeams }));
   const now = new Date();
   const columns = columnsFor(params.view, viewer, now);
   const rowHref = (l: LeadView) => leadsHref(params, { lead: l.id });
@@ -104,7 +104,7 @@ export async function LeadsResults({ ctx, params, viewer }: { ctx: ServiceContex
     const filtered = hasResultFilters(params);
     const empty =
       params.view === "fila"
-        ? { title: "Nenhum lead aguardando decisão", description: "Leads sem responsável ou com Follow-up 3 vencido aparecem aqui." }
+        ? { title: "Nenhum lead aguardando decisão", description: "Leads sem responsável (vendedor desativado) aparecem aqui." }
         : params.view === "lixeira"
           ? { title: "A Lixeira está vazia", description: "Leads enviados para a Lixeira aparecem aqui e podem ser recuperados." }
           : viewer.actor.role === "SELLER"
@@ -192,7 +192,7 @@ export async function LeadsResults({ ctx, params, viewer }: { ctx: ServiceContex
             {(viewer.canManage || params.view === "lixeira") && (
               <p className="mt-2 text-xs text-slate-500">
                 {l.ownerName ?? "Sem responsável"}
-                {viewer.isAdmin ? ` · ${l.teamName}` : ""}
+                {viewer.allTeams ? ` · ${l.teamName}` : ""}
                 {params.view === "lixeira" && l.trashedAt ? ` · na Lixeira desde ${formatRelativeDateTime(l.trashedAt, now)}` : ""}
               </p>
             )}

@@ -14,23 +14,13 @@ Navegador ──► Worker "crmedasi" (Next.js via OpenNext)
 | Item | Por quê |
 |---|---|
 | Conta Cloudflare com **Workers Paid** (US$ 5/mês) | O login usa `scrypt` (N=32768), que gasta dezenas de milissegundos de CPU por tentativa; o plano gratuito limita a 10 ms de CPU por requisição. O pacote (1,8 MB gzip) caberia no gratuito, a CPU do login não. |
-| Migrations 001–009 executadas no Supabase | O deploy não altera o schema (regra do projeto). **Execute a 009 antes de publicar o código que a usa**: sem ela, o login e outras operações falham (lista abaixo). No Supabase de produção da EDASI, 001–009 já foram executadas manualmente. |
+| Migrations 001–014 executadas no Supabase | O deploy não altera o schema (regra do projeto). **Execute a 010 antes de publicar a alteração de perfil em Usuários**: sem ela, só essa operação falha. No Supabase de produção da EDASI, 001–014 já foram executadas manualmente. |
 | Build em **Linux** (Workers Builds, GitHub Actions ou WSL) ou em cópia limpa | O OpenNext cria *symlinks* no build; no Windows sem Modo de Desenvolvedor o build falha com `EPERM`. |
 | **Nenhum `.env` na pasta do build** | O OpenNext embute o conteúdo dele no Worker. Veja a seção 4. |
 
-### O que depende da migration 009
+### Migration 009 sem uso
 
-O código usa a tabela `rate_limit_buckets`. Sem ela, estas operações terminam em erro, porque a consulta à tabela falha (`42P01`):
-
-| Quem | Operação |
-|---|---|
-| Todos os perfis | **Login** e troca da própria senha (tela Perfil) |
-| SELLER | Cadastrar lead e alterar o telefone de um lead |
-| ADMIN | Redefinir senha, alterar e-mail, criar ADMIN e ativar ou desativar ADMIN |
-
-Continuam funcionando sem a tabela: sessões já abertas, cadastro de lead por SUPERVISOR e ADMIN, edição de lead pelo SELLER sem mudar o telefone, alteração só do nome do usuário, e criação e ativação de usuários que não são ADMIN.
-
-A 009 só cria a tabela nova, sem alterar objetos existentes, então a versão já publicada continua funcionando depois dela. A ordem é sempre: **executar a 009, conferir, e só então publicar**. No Supabase de produção da EDASI ela já foi executada manualmente e conferida: não a execute de novo (uma segunda execução é recusada, sem efeito).
+A tabela `rate_limit_buckets` (009) existe no Supabase de produção, mas o código atual não a usa: para caber no plano gratuito (10 ms de CPU), o limite de login voltou a ficar em memória e saíram a confirmação de senha do ADMIN e o limite de telefones duplicados, que consultavam essa tabela. Não a execute de novo nem a apague.
 
 ## 2. Variáveis e secrets
 
@@ -159,10 +149,7 @@ npm run cf:preview
 
 ## 8. Pontos de atenção em produção
 
-- **Limite de tentativas de login**, em três camadas:
-  - **Binding `LOGIN_RATE_LIMITER`** (`wrangler.jsonc`): 20 tentativas por minuto por IP (IPv6 por /64), na borda, antes do banco e do scrypt. Funciona em `*.workers.dev`; o contador é por localização e aproximado.
-  - **Tabela `rate_limit_buckets`** (migration 009, `src/server/auth/rate-limit.ts`): compartilhada entre instâncias. Por janela de 15 minutos: 10 falhas por e-mail + IP, 30 por conta e 100 por IP. O bloqueio **vence sozinho** e o reset de senha pelo ADMIN libera a conta; nada trava uma conta de forma permanente.
-  - **WAF:** regras de Rate Limiting são por zona, e `*.workers.dev` não tem zona. **Só valem depois de ligar um domínio próprio** (abaixo).
+- **Limite de tentativas de login** (`src/server/auth/rate-limit.ts`): 10 falhas a cada 15 min por e-mail + IP, **em memória**. No Workers vale por instância (isolate), então é mais fraco: trocar de IP ou cair em outra instância zera a contagem. Foi mantido assim para não somar consultas ao banco no login do plano gratuito. Regras de WAF são por zona e `*.workers.dev` não tem zona: **só valem depois de ligar um domínio próprio** (abaixo).
 - **IP confiável:** vem de `CF-Connecting-IP`, preenchido pela Cloudflare (`src/server/auth/client-ip.ts`). Sem esse cabeçalho o IP fica desconhecido: `X-Forwarded-For` (cujo primeiro valor é enviado pelo cliente) e `X-Real-IP` só são lidos com `NODE_ENV` `development` (`next dev`) ou `test`. Em qualquer build de produção (o Worker, `cf:preview`, `next start`) eles são ignorados.
 - **Regra de WAF, ao usar domínio próprio:** Cloudflare › seu domínio › Security › WAF › Rate limiting rules › Create rule:
   - *Expression:* `(http.request.method eq "POST" and http.request.uri.path eq "/login")`

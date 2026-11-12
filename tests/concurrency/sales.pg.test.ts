@@ -67,7 +67,7 @@ async function scenario() {
   const teamId = rows[0].id;
   const seller = await insertUser("SELLER", teamId);
   const phone = `5579${String(920000000 + ++seq).slice(0, 9)}`;
-  const leadId = (await createLead(await ctx(seller), { name: `Lead ${seq}`, phone, interestCourseId: COURSE })).id;
+  const leadId = (await createLead(await ctx(seller), { name: `Lead ${seq}`, phone, source: "GOOGLE", interestCourseId: COURSE })).id;
   return { supervisor, teamId, seller, leadId, admin: await insertUser("ADMIN") };
 }
 

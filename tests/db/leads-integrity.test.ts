@@ -21,7 +21,7 @@ beforeAll(async () => {
   handle = await createTestDatabase();
   org = await seedOrganization(handle);
   courseId = await insertCourse(handle);
-  const created = await createLead(await org.ctx(org.ids.sellerA1), { name: "Maria", phone: "79 99999-0001", interestCourseId: courseId });
+  const created = await createLead(await org.ctx(org.ids.sellerA1), { name: "Maria", phone: "79 99999-0001", source: "GOOGLE", interestCourseId: courseId });
   const [cycle] = await handle.db.select({ id: leadCycles.id }).from(leadCycles).where(eq(leadCycles.leadId, created.id));
   lead = { id: created.id, cycleId: cycle.id };
 });
@@ -32,7 +32,7 @@ function rawInsert(phone: string, ownerId = org.ids.sellerA1, teamId = org.ids.t
   return handle.db.transaction(async (tx) => {
     const [row] = await tx
       .insert(leads)
-      .values({ name: "Direto", phone, interestCourseId: courseId, ownerId, teamId, createdBy: ownerId })
+      .values({ name: "Direto", phone, source: "GOOGLE", interestCourseId: courseId, ownerId, teamId, createdBy: ownerId })
       .returning({ id: leads.id });
     await tx.insert(leadCycles).values({ leadId: row.id, number: 1, kind: "INITIAL", assignedSellerId: ownerId, teamId, startedBy: ownerId });
   });
@@ -113,6 +113,7 @@ describe("ciclos", () => {
         handle.db.insert(leads).values({
           name: "Sem ciclo",
           phone: "5579999990020",
+          source: "GOOGLE",
           interestCourseId: courseId,
           ownerId: org.ids.sellerA1,
           teamId: org.ids.teamA,
@@ -164,5 +165,42 @@ describe("sem exclusão física; observações e eventos append-only", () => {
     ]) {
       expect(await dbError(statement)).toContain("não permitida");
     }
+  });
+});
+
+describe("origem do lead (015)", () => {
+  type SourceValues = Pick<typeof leads.$inferInsert, "source" | "sourceDetail">;
+  const insertWith = (phone: string, values: SourceValues) =>
+    handle.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(leads)
+        .values({ name: "Origem", phone, interestCourseId: courseId, ownerId: org.ids.sellerA1, teamId: org.ids.teamA, createdBy: org.ids.sellerA1, ...values })
+        .returning({ id: leads.id });
+      await tx
+        .insert(leadCycles)
+        .values({ leadId: row.id, number: 1, kind: "INITIAL", assignedSellerId: org.ids.sellerA1, teamId: org.ids.teamA, startedBy: org.ids.sellerA1 });
+      return row.id;
+    });
+
+  it("lead novo sem origem é recusado", async () => {
+    expect(await dbError(insertWith("5579999990030", {}))).toContain("informe a origem do lead");
+  });
+
+  it("nome da campanha: obrigatório só em Outras campanhas, sem texto em branco nem acima de 120 caracteres", async () => {
+    for (const values of [
+      { source: "OTHER_CAMPAIGN", sourceDetail: null },
+      { source: "OTHER_CAMPAIGN", sourceDetail: "   " },
+      { source: "OTHER_CAMPAIGN", sourceDetail: "a".repeat(121) },
+      { source: "GOOGLE", sourceDetail: "Campanha" },
+    ] as const) {
+      expect(await dbError(insertWith("5579999990031", values))).toContain("leads_source_detail_consistent");
+    }
+    await expect(insertWith("5579999990032", { source: "OTHER_CAMPAIGN", sourceDetail: "Feira 2026" })).resolves.toBeTypeOf("string");
+  });
+
+  it("depois de informada, a origem pode mudar mas não volta a ficar vazia", async () => {
+    const id = await insertWith("5579999990033", { source: "REFERRAL" });
+    await handle.db.update(leads).set({ source: "STUDENT" }).where(eq(leads.id, id));
+    expect(await dbError(handle.db.update(leads).set({ source: null }).where(eq(leads.id, id)))).toContain("informe a origem do lead");
   });
 });

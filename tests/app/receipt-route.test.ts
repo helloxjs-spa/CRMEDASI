@@ -33,7 +33,7 @@ beforeAll(async () => {
   org = await seedOrganization(handle);
   const course = await insertCourseWithCost(handle, "Pedagogia", 40_000);
   const seller = await org.ctx(org.ids.sellerA1);
-  const lead = async (phone: string) => (await createLead(seller, { name: "Aluno", phone, interestCourseId: course })).id;
+  const lead = async (phone: string) => (await createLead(seller, { name: "Aluno", phone, source: "GOOGLE", interestCourseId: course })).id;
   withReceipt = (await createSale(seller, saleInput(await lead("(79) 99111-0001"), course, { receipt: { fileName: "Recibo São João.png", bytes: PNG } }))).saleId;
   withoutReceipt = (await createSale(seller, saleInput(await lead("(79) 99111-0002"), course))).saleId;
 });

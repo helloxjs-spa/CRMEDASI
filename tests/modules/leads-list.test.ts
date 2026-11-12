@@ -35,6 +35,7 @@ async function seed(sellerId: string, bucket: string[], count: number, prefix: s
     const lead = await createLead(await org.ctx(sellerId), {
       name: `${prefix} ${String(i).padStart(2, "0")}`,
       phone: `(79) 9${String(n).padStart(8, "0")}`,
+      source: "GOOGLE",
       interestCourseId: n % 3 === 0 ? historia : pedagogia,
     });
     bucket.push(lead.id);
@@ -84,13 +85,15 @@ describe("paginação", () => {
     }
   });
 
-  it("supervisor pagina a equipe; filtros de outra equipe ou vendedor não furam o escopo", async () => {
+  it("supervisor pagina todas as equipes e filtra por qualquer equipe ou vendedor, como o admin", async () => {
     const ctx = await org.ctx(org.ids.supA);
+    const admin = await org.ctx(org.ids.admin);
     const page = await listLeads(ctx, { pageSize: 100 });
-    expect(page.total).toBe(35);
-    expect(page.items.every((l) => l.teamId === org.ids.teamA)).toBe(true);
-    expect((await listLeads(ctx, { teamId: org.ids.teamB })).total).toBe(0);
-    expect((await listLeads(ctx, { ownerId: org.ids.sellerB1 })).total).toBe(0);
+    expect(page.total).toBe((await listLeads(admin, { pageSize: 100 })).total);
+    expect(page.items.some((l) => l.teamId === org.ids.teamB)).toBe(true);
+    const ofTeamB = (await listLeads(ctx, { teamId: org.ids.teamB })).total;
+    expect(ofTeamB).toBeGreaterThan(0);
+    expect(ofTeamB).toBe((await listLeads(admin, { teamId: org.ids.teamB })).total);
     expect((await listLeads(ctx, { ownerId: org.ids.sellerA2 })).total).toBe(5);
   });
 
@@ -140,7 +143,7 @@ describe("busca e filtros", () => {
   });
 });
 
-describe("fila de decisão e Follow-up 3 vencido", () => {
+describe("fila de decisão e FUP 3 vencido (C59: só cor, fora da fila)", () => {
   let expired: string;
 
   beforeAll(async () => {
@@ -148,26 +151,34 @@ describe("fila de decisão e Follow-up 3 vencido", () => {
     await setLeadStage(handle, expired, "FOLLOW_UP_3", -1);
   });
 
-  it("o vendedor continua vendo o lead, marcado como aguardando o supervisor, sem poder decidir", async () => {
+  it("o vendedor continua vendo e operando o lead; não decide redistribuição nem Perdido", async () => {
     const seller = await org.ctx(org.ids.sellerA1);
     const item = (await listLeads(seller, { pageSize: 100 })).items.find((l) => l.id === expired);
-    expect(item).toMatchObject({ stage: "FOLLOW_UP_3", queueReason: "FOLLOW_UP_3_EXPIRED", ownerId: org.ids.sellerA1 });
+    expect(item).toMatchObject({ stage: "FOLLOW_UP_3", queueReason: null, ownerId: org.ids.sellerA1 });
     await expect(redistributeLead(seller, expired, { toSellerId: org.ids.sellerA2 })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(trashLead(seller, expired)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(listLeads(seller, { queue: "ALL" })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(countDecisionQueue(seller)).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it("aparece na fila e na contagem do supervisor da equipe, não na de outra", async () => {
+  it("não aparece na fila nem na contagem de supervisores e admin", async () => {
     const supA = await org.ctx(org.ids.supA);
-    expect(await countDecisionQueue(supA)).toEqual({ unassigned: 0, followUp3Expired: 1 });
-    expect((await listLeads(supA, { queue: "FOLLOW_UP_3_EXPIRED" })).items.map((l) => l.id)).toEqual([expired]);
+    expect(await countDecisionQueue(supA)).toEqual({ unassigned: 0 });
+    await expect(listLeads(supA, { queue: "FOLLOW_UP_3_EXPIRED" })).rejects.toBeInstanceOf(ValidationError);
     expect((await listLeads(supA, { queue: "UNASSIGNED" })).total).toBe(0);
 
     const supB = await org.ctx(org.ids.supB);
-    expect(await countDecisionQueue(supB)).toEqual({ unassigned: 0, followUp3Expired: 0 });
+    expect(await countDecisionQueue(supB)).toEqual({ unassigned: 0 });
     expect((await listLeads(supB, { queue: "ALL" })).total).toBe(0);
-    expect(await countDecisionQueue(await org.ctx(org.ids.admin))).toEqual({ unassigned: 0, followUp3Expired: 1 });
+    expect(await countDecisionQueue(await org.ctx(org.ids.admin))).toEqual({ unassigned: 0 });
+  });
+
+  it("filtro por várias etapas (coluna Em contato do Kanban inclui Retrabalho antigo)", async () => {
+    const supA = await org.ctx(org.ids.supA);
+    const both = await listLeads(supA, { status: "ACTIVE", stages: ["FOLLOW_UP_3", "NEW"], pageSize: 100 });
+    expect(both.items.map((l) => l.id)).toContain(expired);
+    expect(both.items.every((l) => l.stage === "FOLLOW_UP_3" || l.stage === "NEW")).toBe(true);
+    await expect(listLeads(supA, { stages: [] })).rejects.toBeInstanceOf(ValidationError);
   });
 });
 
@@ -181,13 +192,13 @@ describe("Lixeira na listagem", () => {
     expect(page.items).toHaveLength(1);
     expect(page.items[0]).toMatchObject({ id: trashed, status: "TRASHED", trashedByName: "Supervisor A", ownerName: "Vendedor A2" });
     expect(page.items[0].trashedAt).toBeInstanceOf(Date);
-    expect((await listLeads(await org.ctx(org.ids.supB), { status: "TRASHED" })).total).toBe(0);
+    expect((await listLeads(await org.ctx(org.ids.supB), { status: "TRASHED" })).total).toBe(1);
   });
 });
 
 describe("opções de filtro", () => {
-  it("vendedores no escopo: supervisor só os da equipe; admin todos; vendedor não acessa", async () => {
-    expect((await listLeadSellers(await org.ctx(org.ids.supA))).map((s) => s.name)).toEqual(["Vendedor A1", "Vendedor A2"]);
+  it("vendedores no escopo: supervisor e admin todos; vendedor não acessa", async () => {
+    expect((await listLeadSellers(await org.ctx(org.ids.supA))).map((s) => s.name)).toEqual(["Vendedor A1", "Vendedor A2", "Vendedor B1"]);
     expect((await listLeadSellers(await org.ctx(org.ids.admin))).map((s) => s.name)).toEqual(["Vendedor A1", "Vendedor A2", "Vendedor B1"]);
     await expect(listLeadSellers(await org.ctx(org.ids.sellerA1))).rejects.toBeInstanceOf(ForbiddenError);
   });

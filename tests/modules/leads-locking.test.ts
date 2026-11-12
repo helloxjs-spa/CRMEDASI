@@ -2,7 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DatabaseHandle } from "@/server/db/connect";
 import { leadEvents, leads, teams, users } from "@/server/db/schema";
-import { NotFoundError, UnauthenticatedError, ValidationError } from "@/server/errors";
+import { UnauthenticatedError, ValidationError } from "@/server/errors";
 import { createLead, editLead, transferLead } from "@/server/modules/leads/leads.service";
 import { createTestDatabase, insertUser, seedOrganization } from "../support/db";
 import { insertCourse } from "../support/leads";
@@ -28,7 +28,7 @@ let phoneSeq = 0;
 const nextPhone = () => `(79) 97${String(++phoneSeq).padStart(7, "0")}`;
 
 async function newLead(sellerId: string) {
-  return createLead(await org.ctx(sellerId), { name: "Maria Souza", phone: nextPhone(), interestCourseId: courseId });
+  return createLead(await org.ctx(sellerId), { name: "Maria Souza", phone: nextPhone(), source: "GOOGLE", interestCourseId: courseId });
 }
 
 const eventTypes = async (leadId: string) =>
@@ -37,7 +37,7 @@ const eventTypes = async (leadId: string) =>
   );
 
 describe("revalidação do ator depois das travas", () => {
-  it("SUPERVISOR que deixou de liderar a equipe (Actor da requisição desatualizado) → fora do escopo, nada gravado", async () => {
+  it("SUPERVISOR que deixou de liderar a equipe continua operando (escopo da empresa não depende da equipe)", async () => {
     const supervisor = await insertUser(handle, { name: "Supervisor Saindo", role: "SUPERVISOR" });
     const [team] = await handle.db.insert(teams).values({ name: "Equipe Saindo", supervisorId: supervisor }).returning();
     const seller = await insertUser(handle, { name: "Vendedor Saindo", role: "SELLER", teamId: team.id });
@@ -47,10 +47,10 @@ describe("revalidação do ator depois das travas", () => {
 
     await handle.db.update(teams).set({ supervisorId: null }).where(eq(teams.id, team.id));
 
-    await expect(transferLead(staleCtx, lead.id, { toSellerId: other })).rejects.toBeInstanceOf(NotFoundError);
+    await transferLead(staleCtx, lead.id, { toSellerId: other });
     const [row] = await handle.db.select({ ownerId: leads.ownerId }).from(leads).where(eq(leads.id, lead.id));
-    expect(row.ownerId).toBe(seller);
-    expect(await eventTypes(lead.id)).toEqual(["CREATED"]);
+    expect(row.ownerId).toBe(other);
+    expect(await eventTypes(lead.id)).toEqual(["CREATED", "TRANSFERRED"]);
   });
 
   it("ator desativado depois de carregado → sessão encerrada, nada gravado", async () => {

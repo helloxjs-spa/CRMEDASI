@@ -51,7 +51,10 @@ export function ActionDialog({
       </Button>
       <dialog
         ref={dialogRef}
-        className="m-auto w-[calc(100%-2rem)] max-w-lg rounded-2xl bg-white p-0 shadow-xl ring-1 ring-slate-200"
+        // O <dialog> herda o CSS de onde está no DOM mesmo aberto no topo da página
+      // (ex.: célula de tabela com text-right/whitespace-nowrap e linha clicável):
+      // os resets abaixo deixam o modal igual em qualquer lugar.
+      className="m-auto w-[calc(100%-2rem)] max-w-lg cursor-auto rounded-2xl bg-white p-0 text-left font-normal whitespace-normal shadow-xl ring-1 ring-slate-200"
         aria-labelledby={`dialog-title-${title}`}
       >
         {session > 0 && (

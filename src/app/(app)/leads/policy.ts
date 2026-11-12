@@ -1,4 +1,4 @@
-import { STAGE_TRANSITIONS } from "@/lib/leads";
+import { isFollowUp3Expired, STAGE_TRANSITIONS } from "@/lib/leads";
 import type { Actor } from "@/server/authz/actor";
 import { hasPermission } from "@/server/authz/permissions";
 import type { LeadStage } from "@/server/db/schema";
@@ -34,7 +34,6 @@ function isOverdueNegotiation(lead: LeadState, now: Date): boolean {
 /** Destinos que o vendedor pode escolher agora (vazio se não pode movimentar). */
 export function moveTargetsFor(lead: LeadState, actor: Pick<Actor, "role" | "userId">, situation: SellerSituation, now = new Date()): LeadStage[] {
   if (!hasPermission(actor, "leads:move") || lead.ownerId !== actor.userId || lead.status !== "ACTIVE") return [];
-  if (lead.queueReason === "FOLLOW_UP_3_EXPIRED") return [];
   if (situation.negotiationBlocked && !isOverdueNegotiation(lead, now)) return [];
   return [...STAGE_TRANSITIONS[lead.stage]];
 }
@@ -43,25 +42,21 @@ export function leadActionsFor(
   lead: LeadState,
   actor: Pick<Actor, "role" | "userId">,
   situation: SellerSituation = { negotiationBlocked: false },
+  now = new Date(),
 ): LeadActionKey[] {
   const actions: LeadActionKey[] = [];
   const active = lead.status === "ACTIVE";
   const operating = active && lead.stage !== "CLOSED";
-  // Follow-up 3 vencido: somente leitura para o vendedor (decisão do supervisor).
-  const sellerReadOnly = actor.role === "SELLER" && lead.queueReason === "FOLLOW_UP_3_EXPIRED";
 
-  if (active && !sellerReadOnly && hasPermission(actor, "leads:edit")) actions.push("edit");
-  if (operating && !sellerReadOnly && hasPermission(actor, "leads:addNote") && lead.ownerId === actor.userId) actions.push("note");
-  if (moveTargetsFor(lead, actor, situation).length > 0) actions.push("move");
+  if (active && hasPermission(actor, "leads:edit")) actions.push("edit");
+  if (operating && hasPermission(actor, "leads:addNote") && lead.ownerId === actor.userId) actions.push("note");
+  if (moveTargetsFor(lead, actor, situation, now).length > 0) actions.push("move");
 
   if (operating && hasPermission(actor, "leads:transfer")) {
-    // Follow-up 3 vencido: o supervisor decide entre Redistribuir e Lixeira.
-    // Sem responsável (vendedor desativado) ou em operação normal: Transferir e Lixeira.
-    if (lead.queueReason === "FOLLOW_UP_3_EXPIRED") {
-      if (hasPermission(actor, "leads:redistribute")) actions.push("redistribute");
-    } else {
-      actions.push("transfer");
-    }
+    // Transferir e Perdido (Lixeira) sempre; FUP 3 vencido (vermelho) também
+    // pode ser redistribuído em novo ciclo, sem travar o vendedor (C59).
+    actions.push("transfer");
+    if (lead.ownerId !== null && isFollowUp3Expired(lead, now) && hasPermission(actor, "leads:redistribute")) actions.push("redistribute");
     if (hasPermission(actor, "leads:trash")) actions.push("trash");
   }
   if (lead.status === "TRASHED" && hasPermission(actor, "leads:restore")) actions.push("restore");

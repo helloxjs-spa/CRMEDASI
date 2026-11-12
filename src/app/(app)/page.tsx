@@ -10,7 +10,7 @@ import { formatLongDate, ROLE_LABELS } from "@/lib/format";
 import { parsePeriodParams } from "@/lib/ranking";
 import { BUSINESS_RULES } from "@/server/config/business-rules";
 import type { ServiceContext } from "@/server/context";
-import { getMyTeam, getTeam, listTeams } from "@/server/modules/teams/teams.service";
+import { getMyTeam, listTeams } from "@/server/modules/teams/teams.service";
 import { listUsers } from "@/server/modules/users/users.service";
 import { requireServiceContext } from "@/server/next/session";
 import { CommercialDashboard } from "./commercial-dashboard";
@@ -41,8 +41,7 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
       />
       <CommercialDashboard ctx={ctx} period={period} periodError={periodError} currentMonth={month} />
       <h2 className="mb-3 mt-8 text-sm font-semibold text-slate-900">Estrutura</h2>
-      {ctx.actor.role === "ADMIN" && <AdminOverview ctx={ctx} />}
-      {ctx.actor.role === "SUPERVISOR" && <SupervisorOverview ctx={ctx} />}
+      {ctx.actor.role !== "SELLER" && <AdminOverview ctx={ctx} />}
       {ctx.actor.role === "SELLER" && <SellerOverview ctx={ctx} />}
     </>
   );
@@ -89,44 +88,6 @@ async function AdminOverview({ ctx }: { ctx: ServiceContext }) {
               ))}
             </Tbody>
           </Table>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-async function SupervisorOverview({ ctx }: { ctx: ServiceContext }) {
-  const myTeam = await getMyTeam(ctx);
-  if (!myTeam) {
-    return (
-      <Card>
-        <EmptyState icon={Building2} title="Você ainda não lidera uma equipe" description="Peça ao administrador para vinculá-lo a uma equipe." />
-      </Card>
-    );
-  }
-  const team = await getTeam(ctx, myTeam.id);
-  const active = team.members.filter((m) => m.active);
-
-  return (
-    <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <StatCard label="Minha equipe" value={team.name} icon={Building2} />
-        <StatCard label="Vendedores ativos" value={active.length} icon={Users} />
-        <StatCard label="Vendedores inativos" value={team.members.length - active.length} icon={UserX} />
-      </div>
-      <Card>
-        <CardHeader title="Vendedores do time" actions={<Link href={`/equipes/${team.id}`} className="text-sm font-medium text-brand-700 hover:underline">Ver equipe</Link>} />
-        {active.length === 0 ? (
-          <EmptyState icon={Users} title="Nenhum vendedor ativo" description="O administrador vincula vendedores às equipes." />
-        ) : (
-          <ul className="divide-y divide-slate-100">
-            {active.map((m) => (
-              <li key={m.id} className="flex items-center justify-between px-5 py-3 text-sm">
-                <span className="font-medium text-slate-900">{m.name}</span>
-                <span className="text-slate-500">{m.email}</span>
-              </li>
-            ))}
-          </ul>
         )}
       </Card>
     </div>

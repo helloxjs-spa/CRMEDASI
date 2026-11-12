@@ -37,11 +37,7 @@ export function navigationFor(actor: Actor): NavSection[] {
   }
 
   const management: NavItem[] = [];
-  if (actor.role === "ADMIN") {
-    management.push({ label: "Equipes", href: "/equipes", icon: "team" });
-  } else if (actor.role === "SUPERVISOR" && actor.supervisedTeamId) {
-    management.push({ label: "Minha equipe", href: `/equipes/${actor.supervisedTeamId}`, icon: "team" });
-  }
+  if (hasPermission(actor, "teams:manage")) management.push({ label: "Equipes", href: "/equipes", icon: "team" });
   if (hasPermission(actor, "users:manage")) management.push({ label: "Usuários", href: "/usuarios", icon: "users" });
   if (hasPermission(actor, "courses:manage")) management.push({ label: "Cursos", href: "/cursos", icon: "courses" });
   if (hasPermission(actor, "audit:view")) management.push({ label: "Auditoria", href: "/auditoria", icon: "audit" });

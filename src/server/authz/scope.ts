@@ -6,9 +6,9 @@ import type { Actor } from "./actor";
 /**
  * Escopo de dados (ownership + equipe). Complementa o RBAC de ./permissions.ts:
  *
- *   ADMIN       → tudo.
- *   SUPERVISOR  → registros cuja equipe é a equipe que ele lidera.
- *   SELLER      → registros dos quais ele é o responsável (owner).
+ *   ADMIN e SUPERVISOR → tudo (decisão do cliente, 2026-11-06: o supervisor
+ *                        vê o mesmo que o ADMIN; a diferença fica só no RBAC).
+ *   SELLER             → registros dos quais ele é o responsável (owner).
  *
  * Toda consulta de recurso com dono (leads, vendas, parcelas, certificados...)
  * deve compor `ownedScope()` no WHERE, inclusive buscas por ID. Assim, trocar um
@@ -17,17 +17,15 @@ import type { Actor } from "./actor";
 
 const NOTHING = sql`false`;
 
+/** Vê os dados da empresa toda (todas as equipes): ADMIN e SUPERVISOR. */
+export function hasCompanyScope(actor: Pick<Actor, "role">): boolean {
+  return actor.role === "ADMIN" || actor.role === "SUPERVISOR";
+}
+
 export type OwnedRecord = { ownerId: string | null; teamId: string | null };
 
 export function canAccessOwned(actor: Actor, record: OwnedRecord): boolean {
-  switch (actor.role) {
-    case "ADMIN":
-      return true;
-    case "SUPERVISOR":
-      return actor.supervisedTeamId !== null && record.teamId === actor.supervisedTeamId;
-    case "SELLER":
-      return record.ownerId === actor.userId;
-  }
+  return hasCompanyScope(actor) || record.ownerId === actor.userId;
 }
 
 export function assertCanAccessOwned(actor: Actor, record: OwnedRecord | null | undefined): asserts record {
@@ -39,29 +37,15 @@ export function ownedScope(
   actor: Actor,
   columns: { ownerId: AnyPgColumn; teamId: AnyPgColumn },
 ): SQL | undefined {
-  switch (actor.role) {
-    case "ADMIN":
-      return undefined;
-    case "SUPERVISOR":
-      return actor.supervisedTeamId ? eq(columns.teamId, actor.supervisedTeamId) : NOTHING;
-    case "SELLER":
-      return eq(columns.ownerId, actor.userId);
-  }
+  return hasCompanyScope(actor) ? undefined : eq(columns.ownerId, actor.userId);
 }
 
-/** Visão de gestão sobre uma equipe (dados agregados, membros, filas do time). */
-export function canManageTeam(actor: Actor, teamId: string | null): boolean {
-  if (actor.role === "ADMIN") return true;
-  return actor.role === "SUPERVISOR" && teamId !== null && teamId === actor.supervisedTeamId;
+/** Visão de gestão (equipes, membros, dados agregados): fora dela → NotFound. */
+export function assertCompanyScope(actor: Pick<Actor, "role">): void {
+  if (!hasCompanyScope(actor)) throw new NotFoundError();
 }
 
-export function assertCanManageTeam(actor: Actor, teamId: string | null): void {
-  if (!canManageTeam(actor, teamId)) throw new NotFoundError();
-}
-
-/** Filtro SQL equivalente a `canManageTeam`. `undefined` = sem restrição. */
-export function managedTeamScope(actor: Actor, teamColumn: AnyPgColumn): SQL | undefined {
-  if (actor.role === "ADMIN") return undefined;
-  if (actor.role === "SUPERVISOR" && actor.supervisedTeamId) return eq(teamColumn, actor.supervisedTeamId);
-  return NOTHING;
+/** Filtro SQL equivalente a `hasCompanyScope`. `undefined` = sem restrição. */
+export function companyScope(actor: Pick<Actor, "role">): SQL | undefined {
+  return hasCompanyScope(actor) ? undefined : NOTHING;
 }

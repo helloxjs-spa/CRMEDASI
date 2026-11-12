@@ -49,9 +49,7 @@ export default async function CertificatesPage({ searchParams }: PageProps<"/cer
         description={
           ctx.actor.role === "SELLER"
             ? "Certificados dos cursos das suas vendas."
-            : ctx.actor.role === "SUPERVISOR"
-              ? "Certificados das vendas dos vendedores da sua equipe."
-              : "Todos os certificados registrados."
+            : "Todos os certificados registrados."
         }
       />
 

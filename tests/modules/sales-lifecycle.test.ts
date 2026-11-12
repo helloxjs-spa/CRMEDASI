@@ -2,7 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DatabaseHandle } from "@/server/db/connect";
 import { leadCycles, leadEvents, leads, saleEvents, saleItems, sales, teams } from "@/server/db/schema";
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@/server/errors";
+import { ConflictError, ForbiddenError, ValidationError } from "@/server/errors";
 import { updateCourse } from "@/server/modules/courses/courses.service";
 import { createLead, REVERSAL_NEEDS_VALID_OWNER, restoreLead, trashLead } from "@/server/modules/leads/leads.service";
 import {
@@ -50,7 +50,7 @@ async function newSeller(name: string, teamId: string = org.ids.teamA): Promise<
 }
 
 async function newLead(sellerId: string): Promise<string> {
-  return (await createLead(await ctx(sellerId), { name: `Cliente ${seq}`, phone: nextPhone(), interestCourseId: course })).id;
+  return (await createLead(await ctx(sellerId), { name: `Cliente ${seq}`, phone: nextPhone(), source: "GOOGLE", interestCourseId: course })).id;
 }
 
 /** Lead do vendedor com uma venda dele; devolve ids. */
@@ -144,11 +144,12 @@ describe("edição de venda", () => {
     expect(await version(saleId)).toBe(v);
   });
 
-  it("SUPERVISOR corrige preço e pagamento (não a data); ADMIN altera a data", async () => {
+  it("SUPERVISOR corrige preço, pagamento e data, como o ADMIN", async () => {
     const { saleId } = await soldLead(org.ids.sellerA1);
     const [item] = await itemsOf(saleId);
     const sup = await ctx(org.ids.supA);
-    await expectError(updateSale(sup, saleId, { expectedVersion: await version(saleId), saleDate: "2026-02-01" }), ForbiddenError);
+    await updateSale(sup, saleId, { expectedVersion: await version(saleId), saleDate: "2026-02-01" });
+    expect((await saleRow(saleId)).saleDate).toBe("2026-02-01");
     await expectError(updateSale(sup, saleId, { expectedVersion: await version(saleId), paymentMethod: "CARD" }), ValidationError, "Informe a quantidade de parcelas do cartão.");
 
     await updateSale(sup, saleId, {
@@ -224,8 +225,8 @@ describe("edição de venda", () => {
       teamId: { from: org.ids.teamA, to: org.ids.teamB },
       supervisorId: { from: org.ids.supA, to: org.ids.supB },
     });
-    // O supervisor A não vê mais a venda (o responsável não está na equipe dele).
-    await expectError(getSale(await ctx(org.ids.supA), saleId), NotFoundError);
+    // Escopo da empresa: o supervisor A continua vendo a venda.
+    expect((await getSale(await ctx(org.ids.supA), saleId)).id).toBe(saleId);
   });
 
   it("novo responsável precisa ser vendedor ativo de equipe ativa", async () => {
@@ -368,8 +369,8 @@ describe("estorno", () => {
     const v = await version(saleId);
     await expectError(reverseSale(await ctx(org.ids.sellerA1), saleId, { expectedVersion: v, reason: "x" }), ForbiddenError);
     await expectError(reverseSale(await ctx(org.ids.supA), saleId, { expectedVersion: v, reason: "   " }), ValidationError, "Informe o motivo.");
-    await expectError(reverseSale(await ctx(org.ids.supB), saleId, { expectedVersion: v, reason: "x" }), NotFoundError);
-    await reverse(org.ids.supA, saleId);
+    // Supervisor de outra equipe também estorna (escopo da empresa).
+    await reverse(org.ids.supB, saleId);
     await expectError(reverse(org.ids.supA, saleId), ValidationError, SALE_ALREADY_REVERSED);
     // Reenvio com a versão antiga: conflito, um único REVERSED.
     await expectError(reverseSale(await ctx(org.ids.supA), saleId, { expectedVersion: v, reason: "x" }), ConflictError);
@@ -447,14 +448,14 @@ describe("reativação", () => {
 });
 
 describe("histórico e dados restritos", () => {
-  it("SELLER e SUPERVISOR veem o histórico completo sem custos; o ADMIN vê os custos dos itens", async () => {
+  it("SELLER vê o histórico completo sem custos; ADMIN e SUPERVISOR veem os custos dos itens", async () => {
     const seller = await newSeller("Vendedor Histórico");
     const { saleId } = await soldLead(seller);
     await updateSale(await ctx(seller), saleId, { expectedVersion: await version(saleId), addItems: [{ courseId: course2, priceCents: 150_000 }] });
     await reverse(org.ids.supA, saleId);
     await reactivate(org.ids.supA, saleId);
 
-    for (const userId of [seller, org.ids.supA]) {
+    for (const userId of [seller]) {
       const history = await getSaleHistory(await ctx(userId), saleId);
       expect(history.map((h) => h.type)).toEqual(["CREATED", "UPDATED", "REVERSED", "REACTIVATED"]);
       const payload = JSON.stringify([history, await getSale(await ctx(userId), saleId)]);
@@ -462,6 +463,7 @@ describe("histórico e dados restritos", () => {
       expect(payload).not.toContain("55000");
     }
     expect(JSON.stringify(await getSaleHistory(await ctx(org.ids.admin), saleId))).toContain("55000");
+    expect(JSON.stringify(await getSaleHistory(await ctx(org.ids.supA), saleId))).toContain("55000");
   });
 
   it("os eventos de status não duplicam e cada UPDATED fica numa transação", async () => {

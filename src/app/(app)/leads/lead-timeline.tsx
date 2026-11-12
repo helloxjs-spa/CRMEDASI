@@ -41,13 +41,13 @@ const ICONS: Record<LeadEventType, { icon: LucideIcon; className: string }> = {
 
 const CYCLE_KIND_LABELS: Record<LeadCycleKind, string> = {
   INITIAL: "Atendimento inicial",
-  REWORK: "Retrabalho",
+  REWORK: "Nova tentativa",
   REOPENED: "Reaberto após estorno",
 };
 
 /**
  * Linha do tempo do lead, a partir de lead_events (e lead_notes), agrupada
- * por ciclo de atendimento: o 1º atendimento e cada Retrabalho ficam
+ * por ciclo de atendimento: o 1º atendimento e cada nova tentativa ficam
  * separados. Mais recente primeiro.
  */
 export function LeadTimeline({

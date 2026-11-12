@@ -57,12 +57,21 @@ export const LEAD_EVENT_TYPES = [
 ] as const;
 export type LeadEventType = (typeof LEAD_EVENT_TYPES)[number];
 
+/**
+ * Origem do lead (migration 015). Obrigatória em lead novo; leads anteriores à
+ * 015 ficam sem origem até serem editados. OTHER_CAMPAIGN exige `sourceDetail`
+ * (nome da campanha); nas demais, `sourceDetail` é NULL (CHECK no SQL).
+ */
+export const LEAD_SOURCES = ["PAID_TRAFFIC", "GOOGLE", "REFERRAL", "CALLBACK", "INTERNAL_TRANSFER", "STUDENT", "OTHER_CAMPAIGN"] as const;
+export type LeadSource = (typeof LEAD_SOURCES)[number];
+
 export const leadStage = pgEnum("lead_stage", LEAD_STAGES);
 export const leadStatus = pgEnum("lead_status", LEAD_STATUSES);
 export const leadUnassignedReason = pgEnum("lead_unassigned_reason", LEAD_UNASSIGNED_REASONS);
 export const leadCycleKind = pgEnum("lead_cycle_kind", LEAD_CYCLE_KINDS);
 export const leadCycleEndReason = pgEnum("lead_cycle_end_reason", LEAD_CYCLE_END_REASONS);
 export const leadEventType = pgEnum("lead_event_type", LEAD_EVENT_TYPES);
+export const leadSource = pgEnum("lead_source", LEAD_SOURCES);
 
 /**
  * Lead. `phone` é canônico (só dígitos, 55 + DDD + número) e único para
@@ -83,6 +92,8 @@ export const leads = pgTable(
     teamId: uuid("team_id")
       .notNull()
       .references(() => teams.id, { onDelete: "restrict" }),
+    source: leadSource("source"),
+    sourceDetail: text("source_detail"),
     unassignedAt: timestamp("unassigned_at", { withTimezone: true }),
     unassignedReason: leadUnassignedReason("unassigned_reason"),
     stage: leadStage("stage").notNull().default("NEW"),

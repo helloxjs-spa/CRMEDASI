@@ -93,7 +93,7 @@ Com mais de uma instância, defina também `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` 
 - Acesso fora do escopo (outro vendedor, outra equipe, ID alterado) retorna **404**, sem revelar que o registro existe.
 - Entradas validadas com schemas estritos: campos extras como `role` ou `teamId` são rejeitados (mass assignment).
 - Custo da bolsa em tabela separada, devolvido só por funções exclusivas do admin; vendedor e supervisor recebem apenas `{ id, name, institutionName }` dos cursos ativos.
-- No banco: e-mail único, um supervisor por equipe, papel imutável, auditoria append-only, curso + instituição únicos e cursos sem exclusão física (triggers).
+- No banco: e-mail único, um supervisor por equipe, papel alterável só pelo ADMIN e sem quebrar vínculos de equipe, leads e vendas, auditoria append-only, curso + instituição únicos e cursos sem exclusão física (triggers).
 - Supabase: RLS ligado em todas as tabelas e nenhum acesso para `anon`/`authenticated`. A API REST pública do Supabase não expõe nenhum dado.
 
 Os testes em [`tests/`](tests) cobrem esses pontos, incluindo "vendedor não acessa recursos de outro vendedor", "supervisor não acessa outra equipe" e "o schema do código bate com o banco".

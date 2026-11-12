@@ -37,7 +37,7 @@ beforeAll(async () => {
 afterAll(() => handle.close());
 
 async function newSale(count: number, prices: number[]): Promise<string> {
-  const lead = await createLead(await ctx(org.ids.sellerA1), { name: `Cliente Antigo ${++seq}`, phone: `(79) 95${String(seq).padStart(7, "0")}`, interestCourseId: course });
+  const lead = await createLead(await ctx(org.ids.sellerA1), { name: `Cliente Antigo ${++seq}`, phone: `(79) 95${String(seq).padStart(7, "0")}`, source: "GOOGLE", interestCourseId: course });
   return (
     await createSale(await ctx(org.ids.admin), {
       requestId: crypto.randomUUID(),

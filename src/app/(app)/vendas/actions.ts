@@ -151,9 +151,9 @@ export async function removeSaleReceiptAction(_prev: ActionState, formData: Form
 }
 
 const REVERSAL_MESSAGES = {
-  KEEP_CLOSED: "Venda estornada. O lead continua em Fechamento porque tem outra venda válida.",
-  REOPEN: "Venda estornada. O lead voltou para Lead cadastrado, com o mesmo responsável, em um novo ciclo.",
-  REOPEN_TO_QUEUE: "Venda estornada. O lead voltou para Lead cadastrado e aguarda o supervisor, pois o responsável está inativo.",
+  KEEP_CLOSED: "Venda estornada. O lead continua em Vendido porque tem outra venda válida.",
+  REOPEN: "Venda estornada. O lead voltou para Em contato, com o mesmo responsável, em um novo ciclo.",
+  REOPEN_TO_QUEUE: "Venda estornada. O lead voltou para Em contato e aguarda o supervisor, pois o responsável está inativo.",
 } as const;
 
 export async function reverseSaleAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -174,6 +174,6 @@ export async function reactivateSaleAction(_prev: ActionState, formData: FormDat
       reason: text(formData, "reason"),
     });
     revalidateSaleViews();
-    return "Venda reativada. O lead está em Fechamento com o responsável da venda.";
+    return "Venda reativada. O lead está em Vendido com o responsável da venda.";
   });
 }

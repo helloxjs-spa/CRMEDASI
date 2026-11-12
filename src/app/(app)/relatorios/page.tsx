@@ -36,7 +36,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/relatori
     <>
       <PageHeader
         title="Relatórios"
-        description={`${ctx.actor.role === "SUPERVISOR" ? "Dados dos vendedores atualmente na sua equipe." : "Dados de todas as equipes."} Arquivos CSV (separados por ponto e vírgula), que abrem no Excel. Até ${REPORT_MAX_ROWS.toLocaleString("pt-BR")} linhas por arquivo.`}
+        description={`Dados de todas as equipes. Arquivos CSV (separados por ponto e vírgula), que abrem no Excel. Até ${REPORT_MAX_ROWS.toLocaleString("pt-BR")} linhas por arquivo.`}
       />
 
       {error && (

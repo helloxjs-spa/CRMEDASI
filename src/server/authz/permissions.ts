@@ -15,13 +15,21 @@ import type { Actor } from "./actor";
  *   é sempre um SELLER (C5).
  * - Vendas (C36, substitui C1): SELLER, SUPERVISOR e ADMIN registram (o
  *   responsável escolhido é sempre um vendedor); SUPERVISOR e ADMIN estornam
- *   e reativam; só o ADMIN escolhe a data da venda.
+ *   e reativam e escolhem a data da venda.
+ * - SUPERVISOR com as permissões do ADMIN (decisão do cliente, 2026-11-06),
+ *   exceto: a Auditoria e tudo que dá ou mexe em acesso de ADMIN (criar ADMIN,
+ *   alterar perfil e editar, redefinir senha ou ativar/desativar um ADMIN).
+ *   O escopo de dados também é o da empresa toda (./scope.ts).
  */
 const MATRIX = {
   // Organização (fase 1)
-  "users:manage": ["ADMIN"],
+  "users:manage": ["ADMIN", "SUPERVISOR"],
+  /** Criar ADMIN e editar, redefinir senha ou ativar/desativar um ADMIN. */
+  "users:manageAdmins": ["ADMIN"],
+  /** Alterar o perfil (papel) de um usuário. */
+  "users:changeRole": ["ADMIN"],
   "users:view": ["ADMIN", "SUPERVISOR"],
-  "teams:manage": ["ADMIN"],
+  "teams:manage": ["ADMIN", "SUPERVISOR"],
   "teams:view": ["ADMIN", "SUPERVISOR"],
   "audit:view": ["ADMIN"],
 
@@ -49,7 +57,7 @@ const MATRIX = {
    */
   "sales:create": ["ADMIN", "SUPERVISOR", "SELLER"],
   /** Informar/alterar a data da venda (os demais registram com a data de hoje no fuso do negócio). */
-  "sales:setDate": ["ADMIN"],
+  "sales:setDate": ["ADMIN", "SUPERVISOR"],
   /** Editar venda no escopo: incluir cursos (itens) com preço. */
   "sales:edit": ["ADMIN", "SUPERVISOR", "SELLER"],
   /** Remover cursos, corrigir preços, forma de pagamento e parcelas (o total é sempre a soma dos itens). */
@@ -67,15 +75,15 @@ const MATRIX = {
   "installments:markPaid": ["ADMIN", "SUPERVISOR"],
   /** Lista operacional de cursos ATIVOS, sem custo (usada em leads e vendas). */
   "courses:list": ["ADMIN", "SUPERVISOR", "SELLER"],
-  "courses:manage": ["ADMIN"],
-  "courses:viewCost": ["ADMIN"],
-  "finance:viewCostAndProfit": ["ADMIN"],
+  "courses:manage": ["ADMIN", "SUPERVISOR"],
+  "courses:viewCost": ["ADMIN", "SUPERVISOR"],
+  "finance:viewCostAndProfit": ["ADMIN", "SUPERVISOR"],
   "certificates:operate": ["ADMIN", "SUPERVISOR", "SELLER"],
   "ranking:view": ["ADMIN", "SUPERVISOR", "SELLER"],
   "reports:export": ["ADMIN", "SUPERVISOR"],
   /** Card "Resultado do mês": todos veem o resultado e a meta de todos os vendedores (decisão do cliente). */
   "goals:view": ["ADMIN", "SUPERVISOR", "SELLER"],
-  /** Definir meta mensal: ADMIN de qualquer vendedor; SUPERVISOR só dos vendedores da equipe que lidera (escopo no serviço). */
+  /** Definir meta mensal de qualquer vendedor ativo. */
   "goals:manage": ["ADMIN", "SUPERVISOR"],
 } as const satisfies Record<string, readonly UserRole[]>;
 

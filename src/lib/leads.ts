@@ -1,4 +1,4 @@
-import type { LeadStage, LeadStatus } from "@/server/db/schema";
+import type { LeadSource, LeadStage, LeadStatus } from "@/server/db/schema";
 import { BUSINESS_RULES } from "@/server/config/business-rules";
 
 /**
@@ -19,43 +19,80 @@ export const STAGE_ORDER = [
 ] as const satisfies readonly LeadStage[];
 
 export const STAGE_LABELS: Record<LeadStage, string> = {
-  NEW: "Lead cadastrado",
-  NO_ANSWER: "Não respondeu",
-  FOLLOW_UP_1: "Follow-up 1",
-  FOLLOW_UP_2: "Follow-up 2",
-  FOLLOW_UP_3: "Follow-up 3",
-  NEGOTIATION: "Em negociação",
-  CLOSED: "Fechamento",
-  REWORK: "Retrabalho",
+  NEW: "Em contato",
+  NO_ANSWER: "Lead quente (ou potencial)",
+  FOLLOW_UP_1: "FUP 1",
+  FOLLOW_UP_2: "FUP 2",
+  FOLLOW_UP_3: "FUP 3",
+  NEGOTIATION: "Em Negociação",
+  CLOSED: "Vendido",
+  // Nova tentativa (redistribuição ou recuperação de Perdido): no Kanban fica na coluna "Em contato" (C59).
+  REWORK: "Em contato (nova tentativa)",
 };
+
+/** Origem do lead, na ordem do enum lead_source (migration 015; um teste confere). */
+export const SOURCE_LABELS: Record<LeadSource, string> = {
+  PAID_TRAFFIC: "Tráfego pago",
+  GOOGLE: "Google",
+  REFERRAL: "Indicação",
+  CALLBACK: "Rechamada",
+  INTERNAL_TRANSFER: "Transferência interna",
+  STUDENT: "Aluno",
+  OTHER_CAMPAIGN: "Outras campanhas",
+};
+
+/** Ordem de exibição das origens (a mesma do enum; um teste confere). */
+export const SOURCE_ORDER = Object.keys(SOURCE_LABELS) as LeadSource[];
+
+/** Origem que exige o nome da campanha. */
+export const SOURCE_WITH_DETAIL = "OTHER_CAMPAIGN" satisfies LeadSource;
+
+/** Tamanho máximo do nome da campanha (CHECK leads_source_detail_consistent). */
+export const SOURCE_DETAIL_MAX_LENGTH = 120;
+
+/** Leads cadastrados antes da migration 015 não têm origem. */
+export const SOURCE_UNKNOWN_LABEL = "Não informada";
+
+/** "Google" ou "Outras campanhas: Feira 2026". */
+export function sourceLabel(lead: { source: LeadSource | null; sourceDetail: string | null }): string {
+  if (!lead.source) return SOURCE_UNKNOWN_LABEL;
+  return lead.sourceDetail ? `${SOURCE_LABELS[lead.source]}: ${lead.sourceDetail}` : SOURCE_LABELS[lead.source];
+}
+
+/** Nome da coluna do Kanban que mostra os leads da Lixeira (C59: Perdido = Lixeira). */
+export const LOST_COLUMN_LABEL = "Perdido";
 
 /** Tamanhos de página aceitos pela listagem (o primeiro é o padrão). */
 export const LEAD_PAGE_SIZES = [25, 50, 100] as const;
 export type LeadPageSize = (typeof LEAD_PAGE_SIZES)[number];
 
-export type LeadQueueReason = "UNASSIGNED" | "FOLLOW_UP_3_EXPIRED";
+export type LeadQueueReason = "UNASSIGNED";
 
 export const QUEUE_REASON_LABELS: Record<LeadQueueReason, string> = {
   UNASSIGNED: "Sem responsável",
-  FOLLOW_UP_3_EXPIRED: "Follow-up 3 vencido",
 };
 
+/** Etapas que o vendedor escolhe à mão no Kanban (C59: movimentação livre entre elas). */
+const MANUAL_STAGES = ["NEW", "NO_ANSWER", "FOLLOW_UP_1", "FOLLOW_UP_2", "FOLLOW_UP_3", "NEGOTIATION"] as const satisfies readonly LeadStage[];
+
 /**
- * Máquina de estados do Kanban: destinos permitidos para a movimentação
- * MANUAL do vendedor. O serviço moveLeadStage valida contra esta tabela.
- * - Não há volta arbitrária (ex.: FU3 → FU2).
- * - REWORK só surge por redistribuição ou recuperação da Lixeira.
- * - CLOSED só surge com uma venda (fase Vendas).
- * - FOLLOW_UP_3 → NEGOTIATION só enquanto o FU3 não venceu (checado no serviço).
+ * Destinos permitidos para a movimentação MANUAL do vendedor. O serviço
+ * moveLeadStage valida contra esta tabela.
+ * - Livre entre as etapas do funil, inclusive voltar (C59).
+ * - CLOSED (Vendido) só surge com uma venda; dele não se sai à mão.
+ * - REWORK só surge por redistribuição ou recuperação (o banco exige); nunca é
+ *   destino manual, e quem está nela pode ir para qualquer etapa do funil.
  */
+const allExcept = (from: LeadStage): readonly LeadStage[] => MANUAL_STAGES.filter((to) => to !== from);
+
 export const STAGE_TRANSITIONS: Record<LeadStage, readonly LeadStage[]> = {
-  NEW: ["NO_ANSWER", "NEGOTIATION"],
-  NO_ANSWER: ["FOLLOW_UP_1", "NEGOTIATION"],
-  FOLLOW_UP_1: ["FOLLOW_UP_2", "NEGOTIATION"],
-  FOLLOW_UP_2: ["FOLLOW_UP_3", "NEGOTIATION"],
-  FOLLOW_UP_3: ["NEGOTIATION"],
-  NEGOTIATION: ["FOLLOW_UP_1"],
-  REWORK: ["FOLLOW_UP_1"],
+  NEW: allExcept("NEW"),
+  NO_ANSWER: allExcept("NO_ANSWER"),
+  FOLLOW_UP_1: allExcept("FOLLOW_UP_1"),
+  FOLLOW_UP_2: allExcept("FOLLOW_UP_2"),
+  FOLLOW_UP_3: allExcept("FOLLOW_UP_3"),
+  NEGOTIATION: allExcept("NEGOTIATION"),
+  REWORK: MANUAL_STAGES,
   CLOSED: [],
 };
 
@@ -89,7 +126,6 @@ type DeadlineFields = { status: LeadStatus; ownerId: string | null; stage: LeadS
 export type DeadlineInfo =
   | { kind: "none" }
   | { kind: "unassigned" }
-  | { kind: "awaiting_supervisor"; dueAt: Date }
   | { kind: "overdue"; dueAt: Date }
   | { kind: "due_today"; dueAt: Date }
   | { kind: "on_time"; dueAt: Date };
@@ -107,32 +143,54 @@ export function sameBusinessDay(a: Date, b: Date): boolean {
 
 /**
  * Situação do prazo calculada a partir de stage_due_at (nada é gravado quando
- * vence). Follow-up 3 vencido = aguardando decisão do supervisor.
+ * vence). Vencer o FUP 3 só muda a cor: o vendedor continua operando (C59).
  */
 export function deadlineInfo(lead: DeadlineFields, now: Date): DeadlineInfo {
   if (lead.status !== "ACTIVE") return { kind: "none" };
   if (lead.ownerId === null) return { kind: "unassigned" };
   const dueAt = lead.stageDueAt;
   if (!dueAt) return { kind: "none" };
-  if (dueAt < now) return lead.stage === "FOLLOW_UP_3" ? { kind: "awaiting_supervisor", dueAt } : { kind: "overdue", dueAt };
+  if (dueAt < now) return { kind: "overdue", dueAt };
   return sameBusinessDay(dueAt, now) ? { kind: "due_today", dueAt } : { kind: "on_time", dueAt };
 }
 
-export type FollowUpAlert = "none" | "warning" | "overdue";
+type FollowUpStage = keyof typeof BUSINESS_RULES.followUpDeadlineHours;
 
-const FOLLOW_UP_STAGES: readonly LeadStage[] = ["FOLLOW_UP_1", "FOLLOW_UP_2", "FOLLOW_UP_3"];
+export type FollowUpAlert = "none" | (typeof BUSINESS_RULES.followUpAlertSteps)[FollowUpStage][number]["alert"];
+
+function isFollowUpStage(stage: LeadStage): stage is FollowUpStage {
+  return stage in BUSINESS_RULES.followUpDeadlineHours;
+}
+
+/** Horas de prazo da etapa (follow-ups e negociação); null nas etapas sem prazo. */
+export function stageDeadlineHours(stage: LeadStage): number | null {
+  if (isFollowUpStage(stage)) return BUSINESS_RULES.followUpDeadlineHours[stage];
+  return stage === "NEGOTIATION" ? BUSINESS_RULES.negotiationDeadlineHours : null;
+}
+
+/** FUP 3 com prazo vencido: o supervisor pode redistribuir (novo ciclo), sem travar o vendedor. */
+export function isFollowUp3Expired(lead: DeadlineFields, now: Date): boolean {
+  return lead.status === "ACTIVE" && lead.stage === "FOLLOW_UP_3" && lead.stageDueAt !== null && lead.stageDueAt < now;
+}
 
 /**
- * Cor do card do Kanban nas etapas de follow-up (C55): amarelo a partir de
- * `followUpWarningHours` na etapa e vermelho depois do prazo. Conta a partir do
- * prazo gravado, que a transferência de responsável não reinicia. Lead sem
- * responsável, na Lixeira ou em outra etapa não muda de cor.
+ * Cor do card do Kanban nas etapas de follow-up (C59): faixas de
+ * `followUpAlertSteps` pelas horas na etapa (FUP 1: vermelho após 24 h; FUP 2:
+ * laranja após 24 h, vermelho após 48 h; FUP 3: amarelo após 24 h, laranja após
+ * 48 h, vermelho após 72 h). Conta a partir do prazo gravado, que a
+ * transferência de responsável não reinicia; prazo vencido é sempre vermelho.
+ * Lead sem responsável, na Lixeira ou em outra etapa não muda de cor.
  */
 export function followUpAlert(lead: DeadlineFields, now: Date): FollowUpAlert {
-  if (!FOLLOW_UP_STAGES.includes(lead.stage)) return "none";
+  if (!isFollowUpStage(lead.stage)) return "none";
   const info = deadlineInfo(lead, now);
-  if (info.kind === "overdue" || info.kind === "awaiting_supervisor") return "overdue";
+  if (info.kind === "overdue") return "red";
   if (info.kind !== "due_today" && info.kind !== "on_time") return "none";
-  const warningLeadMs = (BUSINESS_RULES.followUpDeadlineHours - BUSINESS_RULES.followUpWarningHours) * 3_600_000;
-  return now.getTime() >= info.dueAt.getTime() - warningLeadMs ? "warning" : "none";
+  const enteredAt = info.dueAt.getTime() - BUSINESS_RULES.followUpDeadlineHours[lead.stage] * 3_600_000;
+  const hoursInStage = (now.getTime() - enteredAt) / 3_600_000;
+  let alert: FollowUpAlert = "none";
+  for (const step of BUSINESS_RULES.followUpAlertSteps[lead.stage]) {
+    if (hoursInStage >= step.afterHours) alert = step.alert;
+  }
+  return alert;
 }

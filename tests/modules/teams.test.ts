@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DatabaseHandle } from "@/server/db/connect";
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@/server/errors";
+import { ConflictError, ForbiddenError, ValidationError } from "@/server/errors";
 import {
   createTeam,
   getMyTeam,
@@ -28,26 +28,27 @@ describe("escopo de equipes", () => {
     await expect(getTeam(ctx, org.ids.teamA)).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it("supervisor lista apenas a própria equipe, com contagem de vendedores", async () => {
+  it("supervisor lista todas as equipes, com contagem de vendedores", async () => {
     const list = await listTeams(await org.ctx(org.ids.supA));
-    expect(list).toHaveLength(1);
+    expect(list.map((t) => t.id)).toEqual([org.ids.teamA, org.ids.teamB]);
     expect(list[0]).toMatchObject({ id: org.ids.teamA, supervisorName: "Supervisor A", sellerCount: 2 });
   });
 
-  it("supervisor vê os membros da própria equipe", async () => {
-    const team = await getTeam(await org.ctx(org.ids.supA), org.ids.teamA);
-    expect(team.members.map((m) => m.id).sort()).toEqual([org.ids.sellerA1, org.ids.sellerA2].sort());
-  });
-
-  it("supervisor recebe NotFound ao acessar outra equipe pelo ID", async () => {
-    await expect(getTeam(await org.ctx(org.ids.supA), org.ids.teamB)).rejects.toBeInstanceOf(NotFoundError);
-  });
-
-  it("supervisor não altera equipes", async () => {
+  it("supervisor vê os membros de qualquer equipe, inclusive de outra", async () => {
     const ctx = await org.ctx(org.ids.supA);
-    await expect(updateTeam(ctx, org.ids.teamA, { name: "Renomeada" })).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(setTeamSupervisor(ctx, org.ids.teamB, { supervisorId: org.ids.supA })).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(createTeam(ctx, { name: "Nova" })).rejects.toBeInstanceOf(ForbiddenError);
+    const team = await getTeam(ctx, org.ids.teamA);
+    expect(team.members.map((m) => m.id).sort()).toEqual([org.ids.sellerA1, org.ids.sellerA2].sort());
+    expect((await getTeam(ctx, org.ids.teamB)).members.map((m) => m.id)).toEqual([org.ids.sellerB1]);
+  });
+
+  it("supervisor gerencia equipes como o administrador", async () => {
+    const ctx = await org.ctx(org.ids.supA);
+    const supS = await insertUser(handle, { name: "Supervisor S", role: "SUPERVISOR" });
+    const team = await createTeam(ctx, { name: "Equipe do Supervisor", supervisorId: supS });
+    await updateTeam(ctx, team.id, { name: "Equipe do Supervisor 2" });
+    await setTeamSupervisor(ctx, team.id, { supervisorId: null });
+    expect(await getTeam(ctx, team.id)).toMatchObject({ name: "Equipe do Supervisor 2", supervisorId: null });
+    await updateTeam(ctx, team.id, { active: false });
   });
 
   it("getMyTeam devolve apenas a equipe do próprio usuário, sem membros", async () => {
@@ -60,7 +61,7 @@ describe("escopo de equipes", () => {
 
   it("administrador vê todas as equipes", async () => {
     const list = await listTeams(await org.ctx(org.ids.admin));
-    expect(list.map((t) => t.name)).toEqual(["Equipe A", "Equipe B"]);
+    expect(list.map((t) => t.name)).toEqual(["Equipe A", "Equipe B", "Equipe do Supervisor 2"]);
   });
 });
 
@@ -74,9 +75,10 @@ describe("gestão de equipes (administrador)", () => {
     expect(team).toMatchObject({ name: "Equipe C", supervisorId: supC, supervisorName: "Supervisor C" });
     expect((await listAvailableSupervisors(ctx)).map((s) => s.id)).not.toContain(supC);
 
-    // O novo supervisor passa a enxergar somente a nova equipe.
+    // O novo supervisor enxerga todas as equipes, inclusive a dele.
     const visible = await listTeams(await org.ctx(supC));
-    expect(visible.map((t) => t.id)).toEqual([team.id]);
+    expect(visible.map((t) => t.id)).toContain(team.id);
+    expect(visible.map((t) => t.id)).toContain(org.ids.teamB);
   });
 
   it("nome de equipe é único sem diferenciar maiúsculas", async () => {
@@ -95,7 +97,7 @@ describe("gestão de equipes (administrador)", () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
-  it("troca de supervisor muda o escopo imediatamente", async () => {
+  it("supervisor continua vendo a equipe depois de deixar de liderá-la (escopo da empresa)", async () => {
     const ctx = await org.ctx(org.ids.admin);
     const supE = await insertUser(handle, { name: "Supervisor E", role: "SUPERVISOR" });
     const team = await createTeam(ctx, { name: "Equipe E" });
@@ -103,8 +105,8 @@ describe("gestão de equipes (administrador)", () => {
     await expect(getTeam(await org.ctx(supE), team.id)).resolves.toMatchObject({ id: team.id });
 
     await setTeamSupervisor(ctx, team.id, { supervisorId: null });
-    await expect(getTeam(await org.ctx(supE), team.id)).rejects.toBeInstanceOf(NotFoundError);
-    expect(await listTeams(await org.ctx(supE))).toEqual([]);
+    await expect(getTeam(await org.ctx(supE), team.id)).resolves.toMatchObject({ id: team.id });
+    expect((await listTeams(await org.ctx(supE))).map((t) => t.id)).toContain(team.id);
   });
 
   it("não inativa equipe com vendedores ativos", async () => {

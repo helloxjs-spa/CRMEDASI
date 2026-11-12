@@ -35,9 +35,9 @@ type AdminAction = Extract<LeadActionKey, "transfer" | "redistribute" | "trash" 
 
 const ACTION_META: Record<AdminAction, { label: string; icon: LucideIcon; tone?: "danger" }> = {
   transfer: { label: "Transferir", icon: ArrowRightLeft },
-  redistribute: { label: "Redistribuir (Retrabalho)", icon: RotateCcw },
+  redistribute: { label: "Redistribuir (novo ciclo)", icon: RotateCcw },
   restore: { label: "Recuperar", icon: ArchiveRestore },
-  trash: { label: "Enviar para a Lixeira", icon: Trash2, tone: "danger" },
+  trash: { label: "Marcar como Perdido", icon: Trash2, tone: "danger" },
 };
 
 const ADMIN_ACTIONS: AdminAction[] = ["restore", "transfer", "redistribute", "trash"];
@@ -157,7 +157,7 @@ function TransferModal({ open, onClose, lead }: ModalProps) {
       open={open}
       onClose={onClose}
       title="Transferir lead"
-      description="A transferência mantém a etapa e o prazo atuais. Não cria Retrabalho."
+      description="A transferência mantém a etapa e o prazo atuais. Não abre novo ciclo."
       action={transferLeadAction}
       submitLabel="Transferir"
     >
@@ -178,8 +178,8 @@ function RedistributeModal({ open, onClose, lead }: ModalProps) {
     <ActionModal
       open={open}
       onClose={onClose}
-      title="Redistribuir em Retrabalho"
-      description="Nova tentativa comercial: o lead entra em Retrabalho com o vendedor escolhido, num novo ciclo de atendimento. O histórico anterior é preservado."
+      title="Redistribuir lead"
+      description="Nova tentativa comercial: o lead volta para Em contato com o vendedor escolhido, num novo ciclo de atendimento. O histórico anterior é preservado."
       action={redistributeLeadAction}
       submitLabel="Redistribuir"
     >
@@ -199,8 +199,8 @@ function RestoreModal({ open, onClose, lead }: ModalProps) {
     <ActionModal
       open={open}
       onClose={onClose}
-      title="Recuperar da Lixeira"
-      description="O lead volta em Retrabalho para o vendedor escolhido, com um novo ciclo de atendimento. O histórico anterior é preservado."
+      title="Recuperar de Perdido"
+      description="O lead volta para Em contato com o vendedor escolhido, com um novo ciclo de atendimento. O histórico anterior é preservado."
       action={restoreLeadAction}
       submitLabel="Recuperar"
     >
@@ -220,10 +220,10 @@ function TrashModal({ open, onClose, lead }: ModalProps) {
     <ActionModal
       open={open}
       onClose={onClose}
-      title="Enviar para a Lixeira?"
-      description="O lead sai da operação, mas nada é apagado: o histórico é preservado, o telefone continua ocupado e o supervisor ou o administrador podem recuperá-lo."
+      title="Marcar como Perdido?"
+      description="O lead vai para Perdido (Lixeira) e sai da operação, mas nada é apagado: o histórico é preservado, o telefone continua ocupado e o supervisor ou o administrador podem recuperá-lo."
       action={trashLeadAction}
-      submitLabel="Enviar para a Lixeira"
+      submitLabel="Marcar como Perdido"
       submitVariant="danger"
     >
       {() => (

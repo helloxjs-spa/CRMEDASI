@@ -1,4 +1,4 @@
-import { AlertTriangle, Hourglass, Lock, Phone, SearchX, ShoppingCart, Trash2, UserX } from "lucide-react";
+import { AlertTriangle, Lock, Phone, SearchX, ShoppingCart, Trash2, UserX } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDateTime, formatRelativeDateTime } from "@/lib/format";
 import { formatBRL } from "@/lib/money";
+import { sourceLabel } from "@/lib/leads";
 import { formatPhone } from "@/lib/phone";
 import { formatSaleDate, paymentLabel } from "@/lib/sales";
 import { hasPermission } from "@/server/authz/permissions";
@@ -33,7 +34,7 @@ function Info({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function Notice({ icon: Icon, tone, title, children }: { icon: typeof Hourglass; tone: "brand" | "warning" | "danger"; title: string; children: ReactNode }) {
+function Notice({ icon: Icon, tone, title, children }: { icon: typeof Lock; tone: "brand" | "warning" | "danger"; title: string; children: ReactNode }) {
   const tones = {
     brand: "bg-brand-50 text-brand-900 ring-brand-200",
     warning: "bg-amber-50 text-amber-900 ring-amber-200",
@@ -83,13 +84,13 @@ export async function LeadDetail({
   // Vendas do lead no escopo do ator (sem custos); só o que ele pode abrir.
   const [timeline, relatedSales, now] = [await getLeadTimeline(ctx, id), await listSales(ctx, { leadId: lead.id, pageSize: 25 }), new Date()];
   const canSell = lead.status === "ACTIVE" && hasPermission(ctx.actor, "sales:create");
-  const actions = leadActionsFor(lead, ctx.actor, situation);
+  const actions = leadActionsFor(lead, ctx.actor, situation, now);
   const targets = moveTargetsFor(lead, ctx.actor, situation, now);
   const isSeller = ctx.actor.role === "SELLER";
   const isOwnOverdueNegotiation =
     isSeller && lead.ownerId === ctx.actor.userId && lead.status === "ACTIVE" && lead.stage === "NEGOTIATION" && !!lead.stageDueAt && lead.stageDueAt < now;
   const blockedHere =
-    isSeller && situation.negotiationBlocked && !isOwnOverdueNegotiation && lead.status === "ACTIVE" && lead.queueReason !== "FOLLOW_UP_3_EXPIRED";
+    isSeller && situation.negotiationBlocked && !isOwnOverdueNegotiation && lead.status === "ACTIVE";
 
   return (
     <div className="space-y-6 p-6 pt-5">
@@ -102,7 +103,7 @@ export async function LeadDetail({
           </a>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {lead.status === "TRASHED" ? <Badge tone="danger">Na Lixeira</Badge> : <StageBadge stage={lead.stage} />}
+          {lead.status === "TRASHED" ? <Badge tone="danger">Perdido (Lixeira)</Badge> : <StageBadge stage={lead.stage} />}
           {lead.status === "ACTIVE" && <DeadlineBadge lead={lead} now={now} withDetail={false} />}
         </div>
         <MoveStageButtons leadId={lead.id} targets={targets} />
@@ -116,7 +117,14 @@ export async function LeadDetail({
             )}
             {actions.includes("edit") && (
               <EditLeadDialog
-                lead={{ id: lead.id, name: lead.name, phone: lead.phone, interestCourseId: lead.interestCourseId }}
+                lead={{
+                  id: lead.id,
+                  name: lead.name,
+                  phone: lead.phone,
+                  interestCourseId: lead.interestCourseId,
+                  source: lead.source,
+                  sourceDetail: lead.sourceDetail,
+                }}
                 courses={courses}
               />
             )}
@@ -125,13 +133,6 @@ export async function LeadDetail({
         )}
       </header>
 
-      {lead.queueReason === "FOLLOW_UP_3_EXPIRED" && (
-        <Notice icon={Hourglass} tone="brand" title="Aguardando decisão do supervisor">
-          {isSeller
-            ? "O Follow-up 3 venceu. O lead continua visível para você, mas não pode mais ser movimentado: o supervisor vai redistribuí-lo ou enviá-lo para a Lixeira."
-            : "O Follow-up 3 venceu. Escolha entre Redistribuir (Retrabalho com novo ciclo) ou enviar para a Lixeira."}
-        </Notice>
-      )}
       {isOwnOverdueNegotiation && (
         <Notice icon={AlertTriangle} tone="danger" title="Negociação vencida">
           Registre uma atualização abaixo: o prazo é renovado por mais 24 horas e, sem outras negociações vencidas, o bloqueio de cadastro e
@@ -160,6 +161,11 @@ export async function LeadDetail({
         <div className="col-span-2">
           <Info label="Curso de interesse">
             {lead.interestCourseName} — {lead.interestCourseInstitution}
+          </Info>
+        </div>
+        <div className="col-span-2">
+          <Info label="Origem do lead">
+            <span className={lead.source ? undefined : "text-slate-500"}>{sourceLabel(lead)}</span>
           </Info>
         </div>
         <Info label={lead.status === "TRASHED" ? "Etapa ao ir para a Lixeira" : "Etapa"}>

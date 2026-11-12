@@ -77,7 +77,7 @@ async function soldScenario(prices: number[]) {
   const teamId = await insertTeam(monitor, supervisor);
   const seller = await insertUser(monitor, "SELLER", teamId);
   const phone = `5579${String(940000000 + ++seq).slice(0, 9)}`;
-  const leadId = (await createLead(await ctx(seller), { name: `Lead ${seq}`, phone, interestCourseId: COURSE })).id;
+  const leadId = (await createLead(await ctx(seller), { name: `Lead ${seq}`, phone, source: "GOOGLE", interestCourseId: COURSE })).id;
   const saleId = randomUUID();
   await createSale(await ctx(seller), {
     requestId: saleId,

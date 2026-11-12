@@ -17,7 +17,7 @@ import { listUsers } from "@/server/modules/users/users.service";
 import { requireServiceContext } from "@/server/next/session";
 import { MoveSellerDialog } from "../equipes/team-dialogs";
 import { setUserActiveAction } from "./actions";
-import { CreateUserDialog, EditUserDialog, ResetPasswordDialog, SetAdminActiveDialog } from "./user-dialogs";
+import { ChangeRoleDialog, CreateUserDialog, EditUserDialog, ResetPasswordDialog } from "./user-dialogs";
 
 export const metadata: Metadata = { title: "Usuários" };
 
@@ -47,10 +47,13 @@ export default async function UsersPage({ searchParams }: PageProps<"/usuarios">
   });
   const activeTeams = teams.filter((t) => t.active).map((t) => ({ id: t.id, name: t.name }));
   const hasFilters = !!(role || status || validTeamId || search);
+  // SUPERVISOR gerencia usuários, mas não contas ADMIN nem perfis (o serviço também recusa).
+  const canManageAdmins = hasPermission(ctx.actor, "users:manageAdmins");
+  const canChangeRole = hasPermission(ctx.actor, "users:changeRole");
 
   return (
     <>
-      <PageHeader title="Usuários" description="Administradores, supervisores e vendedores com acesso ao CRM." actions={<CreateUserDialog teams={activeTeams} />} />
+      <PageHeader title="Usuários" description="Administradores, supervisores e vendedores com acesso ao CRM." actions={<CreateUserDialog teams={activeTeams} canCreateAdmin={canManageAdmins} />} />
 
       <form className="mb-4 flex flex-wrap items-center gap-2" role="search">
         <div className="relative min-w-56 flex-1">
@@ -121,13 +124,13 @@ export default async function UsersPage({ searchParams }: PageProps<"/usuarios">
                   <Td>{user.active ? <Badge tone="success">Ativo</Badge> : <Badge>Inativo</Badge>}</Td>
                   <Td>
                     <div className="flex items-center justify-end gap-1">
-                      <EditUserDialog user={user} />
-                      {user.id !== ctx.actor.userId && <ResetPasswordDialog user={user} />}
+                      {(user.role !== "ADMIN" || canManageAdmins) && <EditUserDialog user={user} />}
+                      {canChangeRole && user.id !== ctx.actor.userId && <ChangeRoleDialog user={user} teams={activeTeams} />}
+                      {user.id !== ctx.actor.userId && (user.role !== "ADMIN" || canManageAdmins) && <ResetPasswordDialog user={user} />}
                       {user.role === "SELLER" && (
                         <MoveSellerDialog seller={{ id: user.id, name: user.name }} currentTeamId={user.teamId} teams={activeTeams} />
                       )}
-                      {user.id !== ctx.actor.userId && user.role === "ADMIN" && <SetAdminActiveDialog user={user} />}
-                      {user.id !== ctx.actor.userId && user.role !== "ADMIN" && (
+                      {user.id !== ctx.actor.userId && (user.role !== "ADMIN" || canManageAdmins) && (
                         <ActionButton
                           action={setUserActiveAction}
                           fields={{ userId: user.id, active: String(!user.active) }}

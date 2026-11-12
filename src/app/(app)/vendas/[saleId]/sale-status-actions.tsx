@@ -57,8 +57,8 @@ export function SaleStatusActions({ saleId, version, mode }: { saleId: string; v
         title={reverse ? "Estornar venda" : "Reativar venda"}
         description={
           reverse
-            ? "A venda continua registrada (itens e histórico), mas deixa de contar em faturamento, comissão e ranking. Se for a última venda válida do lead, ele volta para Lead cadastrado em um novo ciclo."
-            : "A venda volta a ser válida e o lead vai para Fechamento com o vendedor responsável da venda."
+            ? "A venda continua registrada (itens e histórico), mas deixa de contar em faturamento, comissão e ranking. Se for a última venda válida do lead, ele volta para Em contato em um novo ciclo."
+            : "A venda volta a ser válida e o lead vai para Vendido com o vendedor responsável da venda."
         }
         action={action}
         submitLabel={reverse ? "Confirmar estorno" : "Confirmar reativação"}

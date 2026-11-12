@@ -27,7 +27,7 @@ const ctx = (userId: string) => org.ctx(userId);
 
 /** Venda Pix registrada pelo ADMIN (que informa a data) para um lead novo do vendedor. */
 async function saleFor(sellerId: string, prices: number[] = [100_000], studentName = `Aluno ${seq + 1}`): Promise<string> {
-  const lead = await createLead(await ctx(sellerId), { name: studentName, phone: nextPhone(), interestCourseId: course });
+  const lead = await createLead(await ctx(sellerId), { name: studentName, phone: nextPhone(), source: "GOOGLE", interestCourseId: course });
   const items = prices.map((priceCents) => ({ courseId: course, priceCents }));
   const input = { requestId: crypto.randomUUID(), leadId: lead.id, sellerId, saleDate: "2026-08-10", paymentMethod: "PIX", items };
   return (await createSale(await ctx(org.ids.admin), input)).saleId;
@@ -123,17 +123,16 @@ describe("registro", () => {
 });
 
 describe("escopo", () => {
-  it("fora do escopo → NotFound (vendedor de outra venda, supervisor de outra equipe, item inexistente)", async () => {
+  it("fora do escopo → NotFound (vendedor de outra venda, item inexistente)", async () => {
     const saleId = await saleFor(org.ids.sellerA1);
     const [item] = await itemsOf(saleId);
     await expect(registerCertificate(await ctx(org.ids.sellerB1), cert(item))).rejects.toBeInstanceOf(NotFoundError);
-    await expect(registerCertificate(await ctx(org.ids.supB), cert(item))).rejects.toBeInstanceOf(NotFoundError);
     await expect(registerCertificate(await ctx(org.ids.admin), cert(crypto.randomUUID()))).rejects.toBeInstanceOf(NotFoundError);
     await expect(getSaleItemCertificates(await ctx(org.ids.sellerB1), saleId)).rejects.toBeInstanceOf(NotFoundError);
     expect(await countFor(item)).toBe(0);
   });
 
-  it("C50: vendedor transferido leva os certificados para o supervisor atual; sem equipe, só ADMIN e ele mesmo", async () => {
+  it("supervisores e ADMIN veem os certificados de todas as equipes, inclusive de vendedor sem equipe", async () => {
     const mover = await insertUser(handle, { name: "Vendedor Certificado", role: "SELLER", teamId: org.ids.teamA });
     const [item] = await itemsOf(await saleFor(mover, [100_000], "Aluna Transferida"));
     await registerCertificate(await ctx(mover), cert(item));
@@ -142,11 +141,11 @@ describe("escopo", () => {
 
     expect(await visibleTo(org.ids.supA)).toEqual(["Aluna Transferida"]);
     await changeSellerTeam(await ctx(org.ids.admin), mover, { teamId: org.ids.teamB });
-    expect(await visibleTo(org.ids.supA)).toEqual([]);
+    expect(await visibleTo(org.ids.supA)).toEqual(["Aluna Transferida"]);
     expect(await visibleTo(org.ids.supB)).toEqual(["Aluna Transferida"]);
 
     await changeSellerTeam(await ctx(org.ids.admin), mover, { teamId: null });
-    expect(await visibleTo(org.ids.supB)).toEqual([]);
+    expect(await visibleTo(org.ids.supB)).toEqual(["Aluna Transferida"]);
     expect(await visibleTo(org.ids.admin)).toEqual(["Aluna Transferida"]);
     expect(await visibleTo(mover)).toEqual(["Aluna Transferida"]);
   });

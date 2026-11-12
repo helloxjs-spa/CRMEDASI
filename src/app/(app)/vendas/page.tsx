@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/cn";
 import { PAYMENT_METHOD_LABELS, SALE_PAGE_SIZES, SALE_STATUS_LABELS } from "@/lib/sales";
 import { hasPermission } from "@/server/authz/permissions";
+import { hasCompanyScope } from "@/server/authz/scope";
 import { listLeadSellers } from "@/server/modules/leads/leads.service";
 import { listTeams } from "@/server/modules/teams/teams.service";
 import { requireServiceContext } from "@/server/next/session";
@@ -24,15 +25,15 @@ export const metadata: Metadata = { title: "Vendas" };
 export default async function SalesPage({ searchParams }: PageProps<"/vendas">) {
   const ctx = await requireServiceContext();
   const { actor } = ctx;
-  const isAdmin = actor.role === "ADMIN";
+  const allTeams = hasCompanyScope(actor);
   const canFilterSeller = hasPermission(actor, "leads:transfer");
-  const viewer: SalesViewer = { canFilterSeller, canFilterTeam: isAdmin, showSeller: actor.role !== "SELLER" };
+  const viewer: SalesViewer = { canFilterSeller, canFilterTeam: allTeams, showSeller: actor.role !== "SELLER" };
   const raw = parseSalesParams(await searchParams);
-  const params: SalesParams = { ...raw, seller: canFilterSeller ? raw.seller : undefined, team: isAdmin ? raw.team : undefined };
+  const params: SalesParams = { ...raw, seller: canFilterSeller ? raw.seller : undefined, team: allTeams ? raw.team : undefined };
 
   const [sellers, teams] = await Promise.all([
     canFilterSeller ? listLeadSellers(ctx) : Promise.resolve([]),
-    isAdmin ? listTeams(ctx) : Promise.resolve([]),
+    allTeams ? listTeams(ctx) : Promise.resolve([]),
   ]);
 
   return (
@@ -42,9 +43,7 @@ export default async function SalesPage({ searchParams }: PageProps<"/vendas">) 
         description={
           actor.role === "SELLER"
             ? "Vendas em que você é o responsável."
-            : actor.role === "SUPERVISOR"
-              ? "Vendas dos vendedores da sua equipe."
-              : "Todas as vendas registradas."
+            : "Todas as vendas registradas."
         }
         actions={
           hasPermission(actor, "sales:create") && (
@@ -106,14 +105,14 @@ export default async function SalesPage({ searchParams }: PageProps<"/vendas">) 
                 {sellers.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
-                    {isAdmin && s.teamName ? ` — ${s.teamName}` : ""}
+                    {allTeams && s.teamName ? ` — ${s.teamName}` : ""}
                     {s.active ? "" : " (inativo)"}
                   </option>
                 ))}
               </Select>
             </FilterField>
           )}
-          {isAdmin && (
+          {allTeams && (
             <FilterField label="Equipe atual do vendedor" htmlFor="sales-team">
               <Select id="sales-team" name="equipe" defaultValue={params.team ?? ""}>
                 <option value="">Todas</option>

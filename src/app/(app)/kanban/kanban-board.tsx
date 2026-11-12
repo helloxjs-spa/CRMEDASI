@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useEffect, useOptimistic, useState, useTransition } from "react";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/cn";
-import { followUpAlert, STAGE_LABELS } from "@/lib/leads";
+import { followUpAlert, STAGE_LABELS, type FollowUpAlert } from "@/lib/leads";
 import type { LeadStage, LeadStatus } from "@/server/db/schema";
 import { DeadlineBadge } from "../leads/lead-badges";
 import { LeadAdminActions, type LeadActionTarget } from "../leads/lead-actions";
@@ -33,18 +33,38 @@ export type KanbanCard = {
   pending?: boolean;
 };
 
-export type KanbanColumn = { stage: LeadStage; total: number; listHref: string; cards: KanbanCard[] };
+export type KanbanColumn = {
+  key: string;
+  /** Etapa que recebe o card ao soltar; null = não aceita arrastar (Perdido, Vendido). */
+  stage: LeadStage | null;
+  title: string;
+  hint?: string;
+  emptyText: string;
+  total: number;
+  listHref: string;
+  cards: KanbanCard[];
+};
 
 type Move = { leadId: string; from: LeadStage; to: LeadStage };
 
 /** De quanto em quanto tempo o quadro recalcula cores e prazos com a tela aberta. */
 const CLOCK_INTERVAL_MS = 60_000;
 
+/** Cor do card por tempo no FUP (C59); a cor vem de followUpAlert. */
+const ALERT_CLASSES: Record<FollowUpAlert, string> = {
+  none: "bg-white ring-slate-200",
+  yellow: "bg-yellow-200 ring-yellow-400",
+  orange: "bg-orange-200 ring-orange-400",
+  red: "bg-red-200 ring-red-400",
+};
+
 function applyMove(columns: KanbanColumn[], move: Move): KanbanColumn[] {
-  const card = columns.find((c) => c.stage === move.from)?.cards.find((c) => c.id === move.leadId);
-  if (!card) return columns;
+  // "Em contato" também guarda REWORK (nova tentativa): procura o card pela coluna em que ele está.
+  const source = columns.find((c) => c.cards.some((card) => card.id === move.leadId));
+  const card = source?.cards.find((c) => c.id === move.leadId);
+  if (!source || !card) return columns;
   return columns.map((column) => {
-    if (column.stage === move.from) return { ...column, total: column.total - 1, cards: column.cards.filter((c) => c.id !== move.leadId) };
+    if (column.key === source.key) return { ...column, total: column.total - 1, cards: column.cards.filter((c) => c.id !== move.leadId) };
     if (column.stage === move.to) {
       return { ...column, total: column.total + 1, cards: [{ ...card, stage: move.to, targets: [], pending: true }, ...column.cards] };
     }
@@ -55,14 +75,14 @@ function applyMove(columns: KanbanColumn[], move: Move): KanbanColumn[] {
 /**
  * Quadro Kanban. Arrastar (ou "Mover para") só oferece destinos válidos, mas
  * isso é conveniência: a action chama moveLeadStage, que valida transição,
- * escopo, Follow-up 3 vencido e negociação vencida. Em erro, o card volta.
+ * escopo e negociação vencida. Em erro, o card volta.
  */
 export function KanbanBoard({ columns, now, canMove }: { columns: KanbanColumn[]; now: string; canMove: boolean }) {
   const move = useMoveLead();
   const [, startTransition] = useTransition();
   const [board, applyOptimistic] = useOptimistic(columns, applyMove);
   const [dragging, setDragging] = useState<KanbanCard | null>(null);
-  const [over, setOver] = useState<LeadStage | null>(null);
+  const [over, setOver] = useState<string | null>(null);
   const [clock, setClock] = useState(0);
   // Os cards mudam de cor sem recarregar; `now` volta a valer quando o servidor renderiza de novo.
   const nowDate = new Date(Math.max(Date.parse(now), clock));
@@ -83,36 +103,38 @@ export function KanbanBoard({ columns, now, canMove }: { columns: KanbanColumn[]
   return (
     <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-4 sm:mx-0 sm:px-0" aria-label="Quadro Kanban">
       {board.map((column) => {
-        const isTarget = !!dragging && dragging.targets.includes(column.stage);
+        const target = column.stage;
+        const isTarget = !!dragging && target !== null && dragging.targets.includes(target);
+        const isSource = !!dragging && column.cards.some((c) => c.id === dragging.id);
         return (
           <section
-            key={column.stage}
-            aria-label={STAGE_LABELS[column.stage]}
+            key={column.key}
+            aria-label={column.title}
             onDragOver={(e) => {
               if (!isTarget) return;
               e.preventDefault();
               e.dataTransfer.dropEffect = "move";
-              if (over !== column.stage) setOver(column.stage);
+              if (over !== column.key) setOver(column.key);
             }}
-            onDragLeave={() => over === column.stage && setOver(null)}
+            onDragLeave={() => over === column.key && setOver(null)}
             onDrop={(e) => {
               e.preventDefault();
               const card = dragging;
               setDragging(null);
               setOver(null);
-              if (card && isTarget) doMove(card, column.stage);
+              if (card && isTarget && target) doMove(card, target);
             }}
             className={cn(
               "flex w-72 shrink-0 snap-start flex-col rounded-xl bg-slate-100/80 ring-1 ring-slate-200 transition",
-              dragging && !isTarget && dragging.stage !== column.stage && "opacity-45",
+              dragging && !isTarget && !isSource && "opacity-45",
               isTarget && "bg-brand-50 outline-2 outline-dashed outline-brand-400",
-              over === column.stage && "outline-brand-700 bg-brand-100/70",
+              over === column.key && "outline-brand-700 bg-brand-100/70",
             )}
           >
             <header className="flex items-center justify-between gap-2 px-3 py-2.5">
               <h2 className="text-sm font-semibold text-slate-800">
-                {STAGE_LABELS[column.stage]}
-                {column.stage === "CLOSED" && <span className="block text-[11px] font-normal text-slate-500">Entra pelo registro de venda</span>}
+                {column.title}
+                {column.hint && <span className="block text-[11px] font-normal text-slate-500">{column.hint}</span>}
               </h2>
               <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200">{column.total}</span>
             </header>
@@ -133,7 +155,7 @@ export function KanbanBoard({ columns, now, canMove }: { columns: KanbanColumn[]
               ))}
               {column.cards.length === 0 && (
                 <li className="rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-400">
-                  {isTarget ? "Solte aqui" : column.stage === "CLOSED" ? "Nenhum lead com venda" : "Nenhum lead"}
+                  {isTarget ? "Solte aqui" : column.emptyText}
                 </li>
               )}
             </ol>
@@ -168,7 +190,7 @@ function Card({
   const draggable = canMove && card.targets.length > 0 && !card.pending;
   const lead = { status: card.status, ownerId: card.ownerId, stage: card.stage, stageDueAt: card.stageDueAt ? new Date(card.stageDueAt) : null };
   // Durante a movimentação o prazo ainda é o da etapa anterior: sem cor até o servidor responder.
-  const alert = card.pending ? "none" : followUpAlert(lead, now);
+  const alert: FollowUpAlert = card.pending ? "none" : followUpAlert(lead, now);
 
   return (
     <li
@@ -181,9 +203,7 @@ function Card({
       onDragEnd={onDragEnd}
       className={cn(
         "group relative rounded-lg p-3 shadow-sm ring-1 transition",
-        alert === "none" && "bg-white ring-slate-200",
-        alert === "warning" && "bg-amber-200 ring-amber-400",
-        alert === "overdue" && "bg-red-200 ring-red-400",
+        ALERT_CLASSES[alert],
         draggable && "cursor-grab active:cursor-grabbing",
         draggable && alert === "none" && "hover:ring-brand-300",
         card.pending && "opacity-70",

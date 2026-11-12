@@ -29,7 +29,7 @@ const first = (raw: RawParams, key: string) => {
 /**
  * Registro de venda: 1) escolher o lead (ativo, no acesso do ator — a mesma
  * consulta da tela de Leads); 2) cursos, preços, pagamento e responsável.
- * Lead com Follow-up 3 ou negociação vencidos também pode receber venda.
+ * Lead com FUP 3 ou negociação vencidos também pode receber venda.
  */
 export default async function NewSalePage({ searchParams }: PageProps<"/vendas/nova">) {
   const ctx = await requireServiceContext();
@@ -43,7 +43,7 @@ export default async function NewSalePage({ searchParams }: PageProps<"/vendas/n
       <Link href="/vendas" className="mb-3 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
         <ArrowLeft className="size-4" aria-hidden /> Vendas
       </Link>
-      <PageHeader title="Registrar venda" description="A venda leva o lead para Fechamento, com o vendedor responsável escolhido." />
+      <PageHeader title="Registrar venda" description="A venda leva o lead para Vendido, com o vendedor responsável escolhido." />
       {leadId ? <SaleStep leadId={leadId} /> : <LeadPicker q={first(raw, "q")?.slice(0, 120)} />}
     </>
   );

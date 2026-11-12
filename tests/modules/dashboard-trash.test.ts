@@ -35,7 +35,7 @@ let seq = 0;
 const nextPhone = () => `(79) 90${String(++seq).padStart(7, "0")}`;
 const ctx = (userId: string) => org.ctx(userId);
 const lead = async (sellerId: string) =>
-  (await createLead(await ctx(sellerId), { name: `Cliente Lixeira ${seq}`, phone: nextPhone(), interestCourseId: course })).id;
+  (await createLead(await ctx(sellerId), { name: `Cliente Lixeira ${seq}`, phone: nextPhone(), source: "GOOGLE", interestCourseId: course })).id;
 const stageCounts = (portfolio: { stage: string; count: number }[]) => Object.fromEntries(portfolio.filter((p) => p.count > 0).map((p) => [p.stage, p.count]));
 
 beforeAll(async () => {
@@ -70,28 +70,30 @@ beforeAll(async () => {
 afterAll(() => handle.close());
 
 describe("indicadores operacionais excluem a Lixeira", () => {
-  it("carteira, alertas e fila do supervisor ignoram os leads enviados à Lixeira", async () => {
+  it("supervisor vê a mesma carteira, alertas e fila do ADMIN (empresa toda), sem a Lixeira", async () => {
     const supA = await getLeadIndicators(await ctx(org.ids.supA), NOW);
-    expect(stageCounts(supA.portfolio)).toEqual({ CLOSED: 1, NEW: 1 });
-    expect(supA.alerts).toEqual({ followUpsOverdue: 0, negotiationsOverdue: 0, awaitingDecision: { unassigned: 0, followUp3Expired: 0 } });
+    const admin = await getLeadIndicators(await ctx(org.ids.admin), NOW);
+    expect(stageCounts(supA.portfolio)).toEqual(stageCounts(admin.portfolio));
+    expect(supA.alerts).toEqual(admin.alerts);
   });
 
   it("ADMIN: só os vencidos fora da Lixeira (controle da equipe B) aparecem", async () => {
     const admin = await getLeadIndicators(await ctx(org.ids.admin), NOW);
     expect(stageCounts(admin.portfolio)).toEqual({ CLOSED: 1, NEW: 1, NEGOTIATION: 1, FOLLOW_UP_3: 1 });
-    expect(admin.alerts).toEqual({ followUpsOverdue: 1, negotiationsOverdue: 1, awaitingDecision: { unassigned: 0, followUp3Expired: 1 } });
+    expect(admin.alerts).toEqual({ followUpsOverdue: 1, negotiationsOverdue: 1, awaitingDecision: { unassigned: 0 } });
   });
 });
 
 describe("leads do período e conversão (#28: Lixeira fora do denominador)", () => {
   it("SUPERVISOR/ADMIN: cadastrados no período continuam com a Lixeira identificada; a conversão usa só os de fora da Lixeira", async () => {
-    expect(await getLeadIndicators(await ctx(org.ids.supA), NOW)).toMatchObject({
-      createdInPeriod: 4,
-      trashedInPeriod: 2,
-      conversionBase: 2,
+    const companyWide = {
+      createdInPeriod: 7,
+      trashedInPeriod: 3,
+      conversionBase: 4,
       convertedInPeriod: 1,
-      conversionRate: 50,
-    });
+      conversionRate: 25,
+    };
+    expect(await getLeadIndicators(await ctx(org.ids.supA), NOW)).toMatchObject(companyWide);
     expect(await getLeadIndicators(await ctx(org.ids.admin), NOW)).toMatchObject({
       createdInPeriod: 7,
       trashedInPeriod: 3,
@@ -101,21 +103,12 @@ describe("leads do período e conversão (#28: Lixeira fora do denominador)", ()
     });
   });
 
-  it("SELLER: escopo inalterado (não vê nem conta os próprios leads na Lixeira) e mesma conversão da equipe", async () => {
+  it("SELLER: escopo inalterado (não vê nem conta os próprios leads na Lixeira)", async () => {
     const seller = await getLeadIndicators(await ctx(org.ids.sellerA1), NOW);
     expect(seller).toMatchObject({ createdInPeriod: 2, trashedInPeriod: 0, conversionBase: 2, convertedInPeriod: 1, conversionRate: 50 });
-    // Antes da #28 a equipe (25%) divergia do único vendedor dela (50%); agora coincidem.
-    expect((await getLeadIndicators(await ctx(org.ids.supA), NOW)).conversionRate).toBe(seller.conversionRate);
   });
 
   it("sem leads elegíveis (todos do período na Lixeira): conversão indisponível, cadastrados identificados", async () => {
-    expect(await getLeadIndicators(await ctx(supC), NOW)).toMatchObject({
-      createdInPeriod: 1,
-      trashedInPeriod: 1,
-      conversionBase: 0,
-      convertedInPeriod: 0,
-      conversionRate: null,
-    });
     expect(await getLeadIndicators(await ctx(sellerC1), NOW)).toMatchObject({ createdInPeriod: 0, conversionBase: 0, conversionRate: null });
   });
 

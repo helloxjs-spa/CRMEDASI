@@ -2,7 +2,7 @@ import { and, asc, count, eq, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { assertPermission } from "@/server/authz/permissions";
-import { assertCanManageTeam, managedTeamScope } from "@/server/authz/scope";
+import { assertCompanyScope, companyScope } from "@/server/authz/scope";
 import type { ServiceContext } from "@/server/context";
 import { isUniqueViolation } from "@/server/db/errors";
 import { teams, users } from "@/server/db/schema";
@@ -71,7 +71,7 @@ export async function listTeams({ db, actor }: ServiceContext): Promise<TeamList
     .from(teams)
     .leftJoin(supervisor, eq(supervisor.id, teams.supervisorId))
     .leftJoin(sellerCounts, eq(sellerCounts.teamId, teams.id))
-    .where(managedTeamScope(actor, teams.id))
+    .where(companyScope(actor))
     .orderBy(asc(teams.name));
 
   return rows.map((r) => ({ ...r, sellerCount: Number(r.sellerCount ?? 0) }));
@@ -83,7 +83,7 @@ export async function getTeam(
 ): Promise<TeamView & { members: TeamMember[] }> {
   assertPermission(actor, "teams:view");
   const id = parseInput(idSchema, rawId);
-  assertCanManageTeam(actor, id);
+  assertCompanyScope(actor);
 
   const team = await findTeamView(db, id);
   if (!team) throw new NotFoundError();

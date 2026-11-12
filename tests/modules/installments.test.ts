@@ -34,7 +34,7 @@ async function sale(
   sellerId: string,
   opts: { prices?: number[]; method?: "PIX" | "CARD" | "BOLETO"; count?: number; date?: string; name?: string } = {},
 ): Promise<string> {
-  const lead = await createLead(await ctx(sellerId), { name: opts.name ?? `Cliente Parcela ${seq + 1}`, phone: nextPhone(), interestCourseId: course });
+  const lead = await createLead(await ctx(sellerId), { name: opts.name ?? `Cliente Parcela ${seq + 1}`, phone: nextPhone(), source: "GOOGLE", interestCourseId: course });
   const method = opts.method ?? "CARD";
   const input = {
     requestId: crypto.randomUUID(),
@@ -135,17 +135,15 @@ describe("pagamento", () => {
     await expect(markInstallmentPaid(await ctx(org.ids.admin), { installmentId: first.id, paidAt: "2026-01-01" })).rejects.toBeInstanceOf(ValidationError);
   });
 
-  it("escopo (C50): supervisor de fora → NotFound; vendedor nunca confirma; supervisor atual do vendedor transferido pode pagar", async () => {
+  it("escopo: vendedor nunca confirma nem vê parcela alheia; qualquer supervisor confirma", async () => {
     const mover = await insertUser(handle, { name: "Vendedor Parcelas", role: "SELLER", teamId: org.ids.teamA });
     const saleId = await sale(mover);
     const [first, second] = await schedule(saleId);
     await expect(pay(org.ids.sellerB1, first.id)).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(pay(org.ids.supB, first.id)).rejects.toBeInstanceOf(NotFoundError);
     await expect(getSaleInstallments(await ctx(org.ids.sellerB1), saleId)).rejects.toBeInstanceOf(NotFoundError);
 
     await changeSellerTeam(await ctx(org.ids.admin), mover, { teamId: org.ids.teamB });
-    await expect(pay(org.ids.supA, first.id)).rejects.toBeInstanceOf(NotFoundError);
-    await pay(org.ids.supB, first.id);
+    await pay(org.ids.supA, first.id);
     await pay(org.ids.admin, second.id);
     expect((await schedule(saleId)).map((p) => p.status)).toEqual(["PAID", "PAID", "OPEN"]);
   });
@@ -210,7 +208,7 @@ describe("quantidade de parcelas × total (cada parcela com pelo menos R$ 0,01)"
   const exceeds = { fieldErrors: { installmentCount: [INSTALLMENTS_EXCEED_TOTAL] } };
 
   it("criação: quantidade maior que o total em centavos é recusada antes de gravar; igual ao total é aceita", async () => {
-    const lead = await createLead(await ctx(org.ids.sellerA1), { name: "Cliente Centavos", phone: nextPhone(), interestCourseId: course });
+    const lead = await createLead(await ctx(org.ids.sellerA1), { name: "Cliente Centavos", phone: nextPhone(), source: "GOOGLE", interestCourseId: course });
     const input = (installmentCount: number) => ({
       requestId: crypto.randomUUID(),
       leadId: lead.id,
@@ -269,7 +267,7 @@ describe(`teto técnico de parcelas (MAX_INSTALLMENTS = ${MAX_INSTALLMENTS})`, (
   const overLimit = { fieldErrors: { installmentCount: [INSTALLMENTS_OVER_LIMIT] } };
 
   it("criação: exatamente o teto é aceito; teto + 1 é recusado no campo, sem gravar nada", async () => {
-    const lead = await createLead(await ctx(org.ids.sellerA1), { name: "Cliente Teto", phone: nextPhone(), interestCourseId: course });
+    const lead = await createLead(await ctx(org.ids.sellerA1), { name: "Cliente Teto", phone: nextPhone(), source: "GOOGLE", interestCourseId: course });
     const input = (installmentCount: number) => ({
       requestId: crypto.randomUUID(),
       leadId: lead.id,
@@ -360,7 +358,7 @@ describe("listagem", () => {
     const window = await listInstallments(me, { dueFrom: "2099-02-01", dueTo: "2099-02-28" });
     expect(window.items.map((p) => [p.saleId, p.number, p.installmentCount, p.amountCents])).toEqual([[future, 1, 2, 15_000]]);
 
-    expect((await listInstallments(await ctx(org.ids.supA), { search: "Aluno Antigo" })).total).toBe(0);
+    expect((await listInstallments(await ctx(org.ids.supA), { search: "Aluno Antigo" })).total).toBe(2);
     expect((await listInstallments(await ctx(org.ids.supB), { search: "Aluno Antigo" })).total).toBe(2);
     expect((await getSaleInstallments(me, old)).map((p) => p.status)).toEqual(["PAID", "OPEN"]);
   });

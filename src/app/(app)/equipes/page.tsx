@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import { Building2, ChevronRight } from "lucide-react";
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Table, Tbody, Td, Th } from "@/components/ui/table";
+import { hasPermission } from "@/server/authz/permissions";
 import { listAvailableSupervisors, listTeams } from "@/server/modules/teams/teams.service";
 import { requireServiceContext } from "@/server/next/session";
 import { CreateTeamDialog } from "./team-dialogs";
@@ -15,9 +16,7 @@ export const metadata: Metadata = { title: "Equipes" };
 
 export default async function TeamsPage() {
   const ctx = await requireServiceContext();
-  // Supervisor tem uma única equipe: vai direto para ela.
-  if (ctx.actor.role === "SUPERVISOR" && ctx.actor.supervisedTeamId) redirect(`/equipes/${ctx.actor.supervisedTeamId}`);
-  if (ctx.actor.role !== "ADMIN") notFound();
+  if (!hasPermission(ctx.actor, "teams:manage")) notFound();
 
   const [teams, supervisors] = await Promise.all([listTeams(ctx), listAvailableSupervisors(ctx)]);
 

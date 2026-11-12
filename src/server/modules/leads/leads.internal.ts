@@ -2,7 +2,7 @@ import { and, asc, count, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { Actor } from "@/server/authz/actor";
 import { leadCycles, leadEvents, leads, teams, users, type LeadEventType, type LeadStage, type LeadUnassignedReason } from "@/server/db/schema";
 import type { Database } from "@/server/db/types";
-import { NotFoundError, UnauthenticatedError } from "@/server/errors";
+import { UnauthenticatedError } from "@/server/errors";
 
 /**
  * Peças internas do módulo de Leads, usadas pelo serviço de leads e pelo
@@ -40,9 +40,8 @@ export type LeadEventInput = {
  * usuários é desativado nem muda de equipe.
  *
  * Revalida o ator com as travas tomadas (o Actor foi carregado no início da
- * requisição): desativado → sessão encerrada; SUPERVISOR que não lidera mais a
- * equipe do escopo → fora do escopo. A equipe liderada também fica travada
- * (FOR SHARE), então a troca de supervisor espera esta transação.
+ * requisição): desativado → sessão encerrada. O escopo do SUPERVISOR é a
+ * empresa toda (não depende da equipe que lidera), então não há o que revalidar.
  */
 export async function lockUsersForChange(
   db: Database,
@@ -58,10 +57,6 @@ export async function lockUsersForChange(
     .for("share");
 
   if (!locked.find((u) => u.id === actor.userId)?.active) throw new UnauthenticatedError();
-  if (actor.role === "SUPERVISOR") {
-    const [led] = await db.select({ id: teams.id }).from(teams).where(eq(teams.supervisorId, actor.userId)).limit(1).for("share");
-    if ((led?.id ?? null) !== actor.supervisedTeamId) throw new NotFoundError();
-  }
   return new Map(locked.map((u) => [u.id, { active: u.active, teamId: u.teamId }]));
 }
 

@@ -40,7 +40,7 @@ let phoneSeq = 0;
 const nextPhone = () => `(79) 9${String(++phoneSeq).padStart(8, "0")}`;
 
 async function newLead(sellerId: string, name = "Maria Souza") {
-  return createLead(await org.ctx(sellerId), { name, phone: nextPhone(), interestCourseId: courseId });
+  return createLead(await org.ctx(sellerId), { name, phone: nextPhone(), source: "GOOGLE", interestCourseId: courseId });
 }
 
 const eventsOf = (leadId: string) => handle.db.select().from(leadEvents).where(eq(leadEvents.leadId, leadId)).orderBy(asc(leadEvents.id));
@@ -52,6 +52,7 @@ describe("cadastro", () => {
     const lead = await createLead(await org.ctx(org.ids.sellerA1), {
       name: "  Ana Lima ",
       phone: "+55 (79) 98888-0001",
+      source: "GOOGLE",
       interestCourseId: courseId,
     });
     expect(lead).toMatchObject({
@@ -86,6 +87,7 @@ describe("cadastro", () => {
     const lead = await createLead(await org.ctx(org.ids.supA), {
       name: "Lead do Supervisor",
       phone: nextPhone(),
+      source: "GOOGLE",
       interestCourseId: courseId,
       sellerId: org.ids.sellerA2,
     });
@@ -101,6 +103,7 @@ describe("cadastro", () => {
     const lead = await createLead(await org.ctx(org.ids.admin), {
       name: "Lead do Admin",
       phone: nextPhone(),
+      source: "GOOGLE",
       interestCourseId: courseId,
       sellerId: org.ids.sellerB1,
     });
@@ -109,8 +112,8 @@ describe("cadastro", () => {
     expect(event).toMatchObject({ actorId: org.ids.admin, ownerId: org.ids.sellerB1, teamId: org.ids.teamB, supervisorId: org.ids.supB });
   });
 
-  it("supervisor/admin: vendedor obrigatório; supervisor não escolhe vendedor de outra equipe; nunca não-vendedor", async () => {
-    const base = { name: "Sem Dono", interestCourseId: courseId };
+  it("supervisor/admin: vendedor obrigatório, de qualquer equipe; nunca não-vendedor", async () => {
+    const base = { name: "Sem Dono", source: "GOOGLE", interestCourseId: courseId };
     const expectFieldError = async (userId: string, input: Record<string, unknown>) => {
       const error = (await createLead(await org.ctx(userId), { ...base, phone: nextPhone(), ...input }).catch((e: unknown) => e)) as ValidationError;
       expect(error).toBeInstanceOf(ValidationError);
@@ -118,11 +121,14 @@ describe("cadastro", () => {
     };
     await expectFieldError(org.ids.supA, {});
     await expectFieldError(org.ids.admin, {});
-    await expectFieldError(org.ids.supA, { sellerId: org.ids.sellerB1 });
-    await expectFieldError(org.ids.supB, { sellerId: org.ids.sellerA1 });
     await expectFieldError(org.ids.admin, { sellerId: org.ids.supA });
+    await expectFieldError(org.ids.supA, { sellerId: org.ids.supB });
+    // Escopo da empresa: supervisor (com ou sem equipe) escolhe vendedor de qualquer equipe.
+    const fromOtherTeam = await createLead(await org.ctx(org.ids.supA), { ...base, phone: nextPhone(), sellerId: org.ids.sellerB1 });
+    expect(fromOtherTeam).toMatchObject({ ownerId: org.ids.sellerB1, teamId: org.ids.teamB });
     const supWithoutTeam = await insertUser(handle, { name: "Supervisor Sem Equipe C41", role: "SUPERVISOR" });
-    await expectFieldError(supWithoutTeam, { sellerId: org.ids.sellerA1 });
+    const byTeamless = await createLead(await org.ctx(supWithoutTeam), { ...base, phone: nextPhone(), sellerId: org.ids.sellerA1 });
+    expect(byTeamless).toMatchObject({ ownerId: org.ids.sellerA1, teamId: org.ids.teamA });
   });
 
   it("vendedor inativo ou de equipe inativa não recebe o lead cadastrado por supervisor/admin", async () => {
@@ -130,6 +136,7 @@ describe("cadastro", () => {
     const inactiveError = (await createLead(await org.ctx(org.ids.admin), {
       name: "Para Inativo",
       phone: nextPhone(),
+      source: "GOOGLE",
       interestCourseId: courseId,
       sellerId: inactive,
     }).catch((e: unknown) => e)) as ValidationError;
@@ -141,6 +148,7 @@ describe("cadastro", () => {
     const teamError = (await createLead(await org.ctx(org.ids.admin), {
       name: "Para Equipe Inativa",
       phone: nextPhone(),
+      source: "GOOGLE",
       interestCourseId: courseId,
       sellerId: sellerC,
     }).catch((e: unknown) => e)) as ValidationError;
@@ -150,26 +158,26 @@ describe("cadastro", () => {
 
   it("vendedor não cadastra na carteira de outro, mas pode informar a si mesmo", async () => {
     const ctx = await org.ctx(org.ids.sellerA1);
-    const error = (await createLead(ctx, { name: "Para Colega", phone: nextPhone(), interestCourseId: courseId, sellerId: org.ids.sellerA2 }).catch(
+    const error = (await createLead(ctx, { name: "Para Colega", phone: nextPhone(), source: "GOOGLE", interestCourseId: courseId, sellerId: org.ids.sellerA2 }).catch(
       (e: unknown) => e,
     )) as ValidationError;
     expect(error).toBeInstanceOf(ValidationError);
     expect(error.fieldErrors.sellerId).toEqual(["Você cadastra leads apenas na sua carteira."]);
-    const own = await createLead(ctx, { name: "Para Mim", phone: nextPhone(), interestCourseId: courseId, sellerId: org.ids.sellerA1 });
+    const own = await createLead(ctx, { name: "Para Mim", phone: nextPhone(), source: "GOOGLE", interestCourseId: courseId, sellerId: org.ids.sellerA1 });
     expect(own).toMatchObject({ ownerId: org.ids.sellerA1, teamId: org.ids.teamA });
   });
 
   it("supervisor/admin: telefone duplicado continua bloqueado", async () => {
     const phone = nextPhone();
-    await createLead(await org.ctx(org.ids.sellerA1), { name: "Original", phone, interestCourseId: courseId });
+    await createLead(await org.ctx(org.ids.sellerA1), { name: "Original", phone, source: "GOOGLE", interestCourseId: courseId });
     await expect(
-      createLead(await org.ctx(org.ids.admin), { name: "Copia", phone, interestCourseId: courseId, sellerId: org.ids.sellerB1 }),
+      createLead(await org.ctx(org.ids.admin), { name: "Copia", phone, source: "GOOGLE", interestCourseId: courseId, sellerId: org.ids.sellerB1 }),
     ).rejects.toBeInstanceOf(LeadAlreadyExistsError);
   });
 
   it("valida nome, telefone, curso ativo e recusa campos não previstos", async () => {
     const ctx = await org.ctx(org.ids.sellerA1);
-    const base = { name: "Fulano", phone: nextPhone(), interestCourseId: courseId };
+    const base = { name: "Fulano", phone: nextPhone(), source: "GOOGLE", interestCourseId: courseId };
     for (const input of [
       { ...base, name: "F" },
       { ...base, phone: "99999-9999" },
@@ -190,17 +198,17 @@ describe("cadastro", () => {
   it("vendedor sem equipe não cadastra", async () => {
     const loose = await insertUser(handle, { name: "Sem Equipe", role: "SELLER" });
     await expect(
-      createLead(await org.ctx(loose), { name: "X Y", phone: nextPhone(), interestCourseId: courseId }),
+      createLead(await org.ctx(loose), { name: "X Y", phone: nextPhone(), source: "GOOGLE", interestCourseId: courseId }),
     ).rejects.toBeInstanceOf(ValidationError);
   });
 });
 
 describe("duplicidade de telefone", () => {
   it("bloqueia o cadastro e informa só responsável e equipe, sem dar acesso ao lead", async () => {
-    const original = await createLead(await org.ctx(org.ids.sellerA1), { name: "Bia", phone: "79 97777-0001", interestCourseId: courseId });
+    const original = await createLead(await org.ctx(org.ids.sellerA1), { name: "Bia", phone: "79 97777-0001", source: "GOOGLE", interestCourseId: courseId });
     const otherSeller = await org.ctx(org.ids.sellerB1);
 
-    const error = await createLead(otherSeller, { name: "Outra", phone: "+55 79 97777-0001", interestCourseId: courseId }).catch(
+    const error = await createLead(otherSeller, { name: "Outra", phone: "+55 79 97777-0001", source: "GOOGLE", interestCourseId: courseId }).catch(
       (e: unknown) => e,
     );
     expect(error).toBeInstanceOf(LeadAlreadyExistsError);
@@ -215,8 +223,8 @@ describe("duplicidade de telefone", () => {
 
   it("cadastros simultâneos do mesmo telefone: só um é criado", async () => {
     const results = await Promise.allSettled([
-      createLead(await org.ctx(org.ids.sellerA1), { name: "Corrida Um", phone: "79 96666-0001", interestCourseId: courseId }),
-      createLead(await org.ctx(org.ids.sellerB1), { name: "Corrida Dois", phone: "(79) 96666-0001", interestCourseId: courseId }),
+      createLead(await org.ctx(org.ids.sellerA1), { name: "Corrida Um", phone: "79 96666-0001", source: "GOOGLE", interestCourseId: courseId }),
+      createLead(await org.ctx(org.ids.sellerB1), { name: "Corrida Dois", phone: "(79) 96666-0001", source: "GOOGLE", interestCourseId: courseId }),
     ]);
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     const rejected = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
@@ -248,15 +256,12 @@ describe("escopo e ownership", () => {
     expect(own.every((l) => l.ownerId === org.ids.sellerA1)).toBe(true);
   });
 
-  it("supervisor vê os leads da equipe e não os de outra (nem por filtro)", async () => {
+  it("supervisor vê os leads de todas as equipes (inclusive por filtro)", async () => {
     const supA = await org.ctx(org.ids.supA);
-    const list = (await listLeads(supA)).items;
-    expect(list.every((l) => l.teamId === org.ids.teamA)).toBe(true);
-    expect(list.map((l) => l.id)).toContain(leadA1);
-    expect((await listLeads(supA, { teamId: org.ids.teamB })).items).toEqual([]);
-    await expect(getLead(supA, leadB1)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(transferLead(supA, leadB1, { toSellerId: org.ids.sellerA1 })).rejects.toBeInstanceOf(NotFoundError);
-    await expect(trashLead(supA, leadB1)).rejects.toBeInstanceOf(NotFoundError);
+    const list = (await listLeads(supA, { pageSize: 100 })).items;
+    expect(list.map((l) => l.id)).toEqual(expect.arrayContaining([leadA1, leadB1]));
+    expect((await listLeads(supA, { teamId: org.ids.teamB, pageSize: 100 })).items.map((l) => l.id)).toContain(leadB1);
+    await expect(getLead(supA, leadB1)).resolves.toMatchObject({ id: leadB1 });
   });
 
   it("administrador vê leads de todas as equipes", async () => {
@@ -342,16 +347,21 @@ describe("transferência", () => {
     await expect(getLead(await org.ctx(org.ids.sellerA2), lead.id)).resolves.toMatchObject({ id: lead.id });
   });
 
-  it("supervisor não transfere para vendedor de outra equipe nem para o mesmo responsável", async () => {
+  it("supervisor não transfere para o mesmo responsável nem para quem não é vendedor", async () => {
     const lead = await newLead(org.ids.sellerA1);
     const supA = await org.ctx(org.ids.supA);
-    await expect(transferLead(supA, lead.id, { toSellerId: org.ids.sellerB1 })).rejects.toBeInstanceOf(ValidationError);
     await expect(transferLead(supA, lead.id, { toSellerId: org.ids.sellerA1 })).rejects.toBeInstanceOf(ValidationError);
     await expect(transferLead(supA, lead.id, { toSellerId: org.ids.supA })).rejects.toBeInstanceOf(ValidationError);
     expect((await rowOf(lead.id)).ownerId).toBe(org.ids.sellerA1);
   });
 
-  it("admin transfere entre equipes; o escopo dos supervisores acompanha", async () => {
+  it("supervisor transfere para vendedor de outra equipe (escopo da empresa)", async () => {
+    const lead = await newLead(org.ids.sellerA1);
+    await transferLead(await org.ctx(org.ids.supB), lead.id, { toSellerId: org.ids.sellerB1 });
+    expect(await rowOf(lead.id)).toMatchObject({ ownerId: org.ids.sellerB1, teamId: org.ids.teamB });
+  });
+
+  it("admin transfere entre equipes; todos os supervisores continuam vendo o lead", async () => {
     const lead = await newLead(org.ids.sellerA1);
     await transferLead(await org.ctx(org.ids.admin), lead.id, { toSellerId: org.ids.sellerB1 });
 
@@ -365,7 +375,7 @@ describe("transferência", () => {
       fromSupervisorId: org.ids.supA,
       supervisorId: org.ids.supB,
     });
-    await expect(getLead(await org.ctx(org.ids.supA), lead.id)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(getLead(await org.ctx(org.ids.supA), lead.id)).resolves.toMatchObject({ teamName: "Equipe B" });
     await expect(getLead(await org.ctx(org.ids.supB), lead.id)).resolves.toMatchObject({ teamName: "Equipe B" });
   });
 });
@@ -405,14 +415,14 @@ describe("desativação do vendedor → fila do supervisor", () => {
     });
   });
 
-  it("os leads entram na fila do supervisor da equipe (e só dele)", async () => {
+  it("os leads entram na fila de decisão, visível a todos os supervisores", async () => {
     const queueA = (await listLeads(await org.ctx(org.ids.supA), { queue: "ALL", pageSize: 100 })).items;
     expect(queueA.filter((q) => [inNegotiation, inFollowUp].includes(q.id)).map((q) => q.queueReason)).toEqual([
       "UNASSIGNED",
       "UNASSIGNED",
     ]);
     const queueB = (await listLeads(await org.ctx(org.ids.supB), { queue: "ALL", pageSize: 100 })).items;
-    expect(queueB.map((q) => q.id)).not.toContain(inNegotiation);
+    expect(queueB.map((q) => q.id)).toContain(inNegotiation);
     expect((await listLeads(await org.ctx(org.ids.supA), { queue: "UNASSIGNED" })).items.map((l) => l.id)).toEqual(
       expect.arrayContaining([inNegotiation, inFollowUp]),
     );
@@ -470,7 +480,7 @@ describe("troca de equipe do vendedor", () => {
       supervisorId: org.ids.supB,
       ownerId: seller,
     });
-    await expect(getLead(await org.ctx(org.ids.supA), lead.id)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(getLead(await org.ctx(org.ids.supA), lead.id)).resolves.toBeTruthy();
     await expect(getLead(await org.ctx(org.ids.supB), lead.id)).resolves.toBeTruthy();
   });
 
@@ -488,8 +498,8 @@ describe("troca de equipe do vendedor", () => {
   });
 });
 
-describe("Follow-up 3 vencido → redistribuição (Retrabalho)", () => {
-  it("só redistribui com Follow-up 3 vencido", async () => {
+describe("FUP 3 vencido → redistribuição (novo ciclo, Em contato)", () => {
+  it("só redistribui com FUP 3 vencido", async () => {
     const lead = await newLead(org.ids.sellerA1);
     const supA = await org.ctx(org.ids.supA);
     await expect(redistributeLead(supA, lead.id, { toSellerId: org.ids.sellerA2 })).rejects.toBeInstanceOf(ValidationError);
@@ -498,16 +508,13 @@ describe("Follow-up 3 vencido → redistribuição (Retrabalho)", () => {
     expect((await listLeads(supA, { queue: "ALL", pageSize: 100 })).items.map((q) => q.id)).not.toContain(lead.id);
   });
 
-  it("FU3 vencido aparece na fila; redistribuir abre ciclo 2 REWORK com o novo vendedor", async () => {
+  it("FUP 3 vencido não entra na fila (C59); redistribuir abre ciclo 2 com o novo vendedor, em Em contato", async () => {
     const lead = await newLead(org.ids.sellerA1);
     await setLeadStage(handle, lead.id, "FOLLOW_UP_3", -1);
     const supA = await org.ctx(org.ids.supA);
 
-    const item = (await listLeads(supA, { queue: "ALL", pageSize: 100 })).items.find((q) => q.id === lead.id);
-    expect(item).toMatchObject({ queueReason: "FOLLOW_UP_3_EXPIRED", ownerId: org.ids.sellerA1 });
-    await expect(redistributeLead(await org.ctx(org.ids.supB), lead.id, { toSellerId: org.ids.sellerB1 })).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
+    expect((await listLeads(supA, { queue: "ALL", pageSize: 100 })).items.map((q) => q.id)).not.toContain(lead.id);
+    await expect(getLead(supA, lead.id)).resolves.toMatchObject({ queueReason: null, ownerId: org.ids.sellerA1 });
 
     await redistributeLead(supA, lead.id, { toSellerId: org.ids.sellerA2 });
 
@@ -563,6 +570,7 @@ describe("Lixeira e recuperação", () => {
     const error = await createLead(await org.ctx(org.ids.sellerB1), {
       name: "Nova Tentativa",
       phone: lead.phone,
+      source: "GOOGLE",
       interestCourseId: courseId,
     }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(LeadAlreadyExistsError);
@@ -577,19 +585,17 @@ describe("Lixeira e recuperação", () => {
     await expect(trashLead(supA, lead.id)).rejects.toBeInstanceOf(ValidationError);
   });
 
-  it("recuperação: supervisor só dentro da equipe; supervisor de outra equipe não enxerga", async () => {
-    await expect(restoreLead(await org.ctx(org.ids.supA), lead.id, { toSellerId: org.ids.sellerB1 })).rejects.toBeInstanceOf(
+  it("recuperação: todo supervisor enxerga a Lixeira; só recupera o que está nela, para vendedor", async () => {
+    await expect(getLead(await org.ctx(org.ids.supB), lead.id)).resolves.toMatchObject({ id: lead.id });
+    await expect(restoreLead(await org.ctx(org.ids.supB), lead.id, { toSellerId: org.ids.supA })).rejects.toBeInstanceOf(
       ValidationError,
-    );
-    await expect(restoreLead(await org.ctx(org.ids.supB), lead.id, { toSellerId: org.ids.sellerB1 })).rejects.toBeInstanceOf(
-      NotFoundError,
     );
     await expect(restoreLead(await org.ctx(org.ids.supA), (await newLead(org.ids.sellerA1)).id, { toSellerId: org.ids.sellerA2 })).rejects.toBeInstanceOf(
       ValidationError,
     );
   });
 
-  it("admin recupera para vendedor de outra equipe: Retrabalho, novo ciclo e histórico preservado", async () => {
+  it("admin recupera para vendedor de outra equipe: Em contato, novo ciclo e histórico preservado", async () => {
     await restoreLead(await org.ctx(org.ids.admin), lead.id, { toSellerId: org.ids.sellerB1 });
 
     expect(await rowOf(lead.id)).toMatchObject({
@@ -635,7 +641,6 @@ describe("histórico", () => {
 
     const [created] = await getLeadTimeline(await org.ctx(supC2), lead.id);
     expect(created).toMatchObject({ type: "CREATED", supervisorName: "Supervisor C1" });
-    await expect(getLead(await org.ctx(supC1), lead.id)).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 
@@ -682,15 +687,14 @@ describe("edição de lead (nome, telefone, curso de interesse)", () => {
     expect(await detailsEvents(ofA2.id)).toHaveLength(0);
   });
 
-  it("supervisor edita leads da própria equipe e não os de outra", async () => {
+  it("supervisor edita leads de qualquer equipe", async () => {
     const ofA2 = await newLead(org.ids.sellerA2, "Lead Equipe A");
     const ofB1 = await newLead(org.ids.sellerB1, "Lead Equipe B");
     const supA = await org.ctx(org.ids.supA);
     await expect(editLead(supA, ofA2.id, { name: "Corrigido pelo Supervisor" })).resolves.toMatchObject({
       name: "Corrigido pelo Supervisor",
     });
-    await expect(editLead(supA, ofB1.id, { name: "Invadido" })).rejects.toBeInstanceOf(NotFoundError);
-    expect((await rowOf(ofB1.id)).name).toBe("Lead Equipe B");
+    await expect(editLead(supA, ofB1.id, { name: "Corrigido em Outra Equipe" })).resolves.toMatchObject({ name: "Corrigido em Outra Equipe" });
   });
 
   it("admin edita lead de qualquer equipe", async () => {
@@ -731,7 +735,7 @@ describe("edição de lead (nome, telefone, curso de interesse)", () => {
   });
 
   it("telefone de outro lead ativo: bloqueia com responsável e equipe, sem alterar nada", async () => {
-    const existing = await createLead(await org.ctx(org.ids.sellerB1), { name: "Dono", phone: "79 95555-0100", interestCourseId: courseId });
+    const existing = await createLead(await org.ctx(org.ids.sellerB1), { name: "Dono", phone: "79 95555-0100", source: "GOOGLE", interestCourseId: courseId });
     const lead = await newLead(org.ids.sellerA1, "Tentando Duplicar");
     const before = await rowOf(lead.id);
 
@@ -746,7 +750,7 @@ describe("edição de lead (nome, telefone, curso de interesse)", () => {
   });
 
   it("telefone de lead na Lixeira: bloqueia com a mensagem da Lixeira", async () => {
-    const trashed = await createLead(await org.ctx(org.ids.sellerA2), { name: "Na Lixeira", phone: "79 95555-0200", interestCourseId: courseId });
+    const trashed = await createLead(await org.ctx(org.ids.sellerA2), { name: "Na Lixeira", phone: "79 95555-0200", source: "GOOGLE", interestCourseId: courseId });
     await trashLead(await org.ctx(org.ids.supA), trashed.id);
     const lead = await newLead(org.ids.sellerA1);
     const before = await rowOf(lead.id);
@@ -888,5 +892,64 @@ describe("inativação de equipe com leads ativos", () => {
     await transferLead(admin, open.id, { toSellerId: org.ids.sellerA1 });
     await expect(updateTeam(admin, team.id, { active: false })).resolves.toMatchObject({ active: false });
     expect(await rowOf(trashed.id)).toMatchObject({ status: "TRASHED", teamId: team.id });
+  });
+});
+
+describe("origem do lead (015)", () => {
+  it("cadastro exige a origem; Outras campanhas exige o nome da campanha", async () => {
+    const ctx = await org.ctx(org.ids.sellerA1);
+    const base = { name: "Origem", interestCourseId: courseId };
+    const fieldErrorsOf = async (input: Record<string, unknown>) =>
+      ((await createLead(ctx, { ...base, phone: nextPhone(), ...input }).catch((e: unknown) => e)) as ValidationError).fieldErrors;
+    expect(await fieldErrorsOf({})).toEqual({ source: ["Selecione a origem do lead."] });
+    expect(await fieldErrorsOf({ source: "" })).toEqual({ source: ["Selecione a origem do lead."] });
+    expect(await fieldErrorsOf({ source: "FACEBOOK" })).toEqual({ source: ["Selecione a origem do lead."] });
+    expect(await fieldErrorsOf({ source: "OTHER_CAMPAIGN", sourceDetail: "   " })).toEqual({ sourceDetail: ["Informe qual foi a campanha."] });
+    expect(await fieldErrorsOf({ source: "OTHER_CAMPAIGN", sourceDetail: "a".repeat(121) })).toEqual({
+      sourceDetail: ["Use no máximo 120 caracteres."],
+    });
+  });
+
+  it("grava a origem; o nome da campanha só vale em Outras campanhas", async () => {
+    const ctx = await org.ctx(org.ids.sellerA1);
+    const other = await createLead(ctx, { name: "Campanha", phone: nextPhone(), interestCourseId: courseId, source: "OTHER_CAMPAIGN", sourceDetail: " Feira 2026 " });
+    expect(other).toMatchObject({ source: "OTHER_CAMPAIGN", sourceDetail: "Feira 2026" });
+    // Texto que sobrou de quando "Outras campanhas" estava selecionada é descartado.
+    const referral = await createLead(ctx, { name: "Indicado", phone: nextPhone(), interestCourseId: courseId, source: "REFERRAL", sourceDetail: "Sobrou" });
+    expect(referral).toMatchObject({ source: "REFERRAL", sourceDetail: null });
+  });
+
+  it("edição troca a origem com de/para no histórico; sem mudança, nada é gravado", async () => {
+    const lead = await newLead(org.ids.sellerA1, "Troca de Origem");
+    const ctx = await org.ctx(org.ids.sellerA1);
+    await editLead(ctx, lead.id, { source: "GOOGLE" });
+    expect(await eventsOf(lead.id)).toHaveLength(1);
+
+    await expect(editLead(ctx, lead.id, { source: "OTHER_CAMPAIGN" })).rejects.toBeInstanceOf(ValidationError);
+    expect(await editLead(ctx, lead.id, { source: "OTHER_CAMPAIGN", sourceDetail: "Feira" })).toMatchObject({
+      source: "OTHER_CAMPAIGN",
+      sourceDetail: "Feira",
+    });
+    expect(await editLead(ctx, lead.id, { source: "STUDENT", sourceDetail: "Feira" })).toMatchObject({ source: "STUDENT", sourceDetail: null });
+    const events = (await eventsOf(lead.id)).filter((e) => e.type === "DETAILS_UPDATED");
+    expect(events.map((e) => e.metadata)).toEqual([
+      { source: { from: { source: "GOOGLE", detail: null }, to: { source: "OTHER_CAMPAIGN", detail: "Feira" } } },
+      { source: { from: { source: "OTHER_CAMPAIGN", detail: "Feira" }, to: { source: "STUDENT", detail: null } } },
+    ]);
+  });
+
+  it("lead anterior à 015 (sem origem) recebe a origem na edição; o histórico registra que não havia", async () => {
+    const lead = await newLead(org.ids.sellerA1, "Lead Antigo");
+    // Simula um lead cadastrado antes da migration (o trigger impede limpar a origem).
+    await handle.db.execute(sql`ALTER TABLE leads DISABLE TRIGGER leads_source_required`);
+    await handle.db.update(leads).set({ source: null }).where(eq(leads.id, lead.id));
+    await handle.db.execute(sql`ALTER TABLE leads ENABLE TRIGGER leads_source_required`);
+    const ctx = await org.ctx(org.ids.sellerA1);
+    expect(await getLead(ctx, lead.id)).toMatchObject({ source: null, sourceDetail: null });
+
+    await editLead(ctx, lead.id, { source: "CALLBACK" });
+    expect(await getLead(ctx, lead.id)).toMatchObject({ source: "CALLBACK" });
+    const [event] = (await eventsOf(lead.id)).filter((e) => e.type === "DETAILS_UPDATED");
+    expect(event.metadata).toEqual({ source: { from: null, to: { source: "CALLBACK", detail: null } } });
   });
 });

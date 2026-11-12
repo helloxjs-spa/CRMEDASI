@@ -100,10 +100,10 @@ describe("ações oferecidas pela interface", () => {
     expect(saleActionsFor({ status: "REVERSED" }, { role: "SELLER" })).toEqual([]);
     expect(saleEditCapabilities({ role: "SELLER" })).toEqual({ financial: false, changeSeller: false, setDate: false });
   });
-  it("SUPERVISOR: financeiro e responsável, sem data; ADMIN: tudo", () => {
+  it("SUPERVISOR e ADMIN: financeiro, responsável e data", () => {
     expect(saleActionsFor({ status: "ACTIVE" }, { role: "SUPERVISOR" })).toEqual(["edit", "reverse"]);
     expect(saleActionsFor({ status: "REVERSED" }, { role: "SUPERVISOR" })).toEqual(["edit", "reactivate"]);
-    expect(saleEditCapabilities({ role: "SUPERVISOR" })).toEqual({ financial: true, changeSeller: true, setDate: false });
+    expect(saleEditCapabilities({ role: "SUPERVISOR" })).toEqual({ financial: true, changeSeller: true, setDate: true });
     expect(saleEditCapabilities({ role: "ADMIN" })).toEqual({ financial: true, changeSeller: true, setDate: true });
   });
 });

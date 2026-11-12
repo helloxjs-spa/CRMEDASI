@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Actor } from "@/server/authz/actor";
 import { hasPermission } from "@/server/authz/permissions";
-import { canAccessOwned, canManageTeam } from "@/server/authz/scope";
+import { canAccessOwned, hasCompanyScope } from "@/server/authz/scope";
 
 const admin: Actor = { userId: "admin", name: "", email: "", role: "ADMIN", teamId: null, supervisedTeamId: null };
 const supA: Actor = { userId: "supA", name: "", email: "", role: "SUPERVISOR", teamId: null, supervisedTeamId: "teamA" };
@@ -13,16 +13,24 @@ const recordOfA2 = { ownerId: "a2", teamId: "teamA" };
 const recordOfB1 = { ownerId: "b1", teamId: "teamB" };
 
 describe("RBAC — matriz de permissões", () => {
-  it("custo de bolsa e lucro são exclusivos do administrador", () => {
-    expect(hasPermission(admin, "courses:viewCost")).toBe(true);
-    expect(hasPermission(supA, "courses:viewCost")).toBe(false);
-    expect(hasPermission(sellerA1, "courses:viewCost")).toBe(false);
-    expect(hasPermission(supA, "finance:viewCostAndProfit")).toBe(false);
-    expect(hasPermission(sellerA1, "finance:viewCostAndProfit")).toBe(false);
+  it("custo de bolsa, lucro e gestão de cursos: ADMIN e SUPERVISOR; vendedor não", () => {
+    for (const permission of ["courses:viewCost", "courses:manage", "finance:viewCostAndProfit"] as const) {
+      expect(hasPermission(admin, permission)).toBe(true);
+      expect(hasPermission(supA, permission)).toBe(true);
+      expect(hasPermission(sellerA1, permission)).toBe(false);
+    }
   });
 
-  it("gestão de usuários e equipes é exclusiva do administrador", () => {
-    for (const permission of ["users:manage", "teams:manage", "audit:view"] as const) {
+  it("gestão de usuários e equipes: ADMIN e SUPERVISOR; vendedor não", () => {
+    for (const permission of ["users:manage", "teams:manage"] as const) {
+      expect(hasPermission(admin, permission)).toBe(true);
+      expect(hasPermission(supA, permission)).toBe(true);
+      expect(hasPermission(sellerA1, permission)).toBe(false);
+    }
+  });
+
+  it("exclusivo do ADMIN: Auditoria, contas ADMIN e alteração de perfil", () => {
+    for (const permission of ["audit:view", "users:manageAdmins", "users:changeRole"] as const) {
       expect(hasPermission(admin, permission)).toBe(true);
       expect(hasPermission(supA, permission)).toBe(false);
       expect(hasPermission(sellerA1, permission)).toBe(false);
@@ -41,13 +49,13 @@ describe("RBAC — matriz de permissões", () => {
     expect(hasPermission(unknownRole, "leads:create")).toBe(false);
   });
 
-  it("vendas (C36): todos registram e consultam (com escopo); só o admin escolhe a data", () => {
+  it("vendas (C36): todos registram e consultam (com escopo); ADMIN e SUPERVISOR escolhem a data", () => {
     for (const actor of [admin, supA, sellerA1]) {
       expect(hasPermission(actor, "sales:create")).toBe(true);
       expect(hasPermission(actor, "sales:view")).toBe(true);
     }
     expect(hasPermission(admin, "sales:setDate")).toBe(true);
-    expect(hasPermission(supA, "sales:setDate")).toBe(false);
+    expect(hasPermission(supA, "sales:setDate")).toBe(true);
     expect(hasPermission(sellerA1, "sales:setDate")).toBe(false);
   });
 
@@ -97,33 +105,20 @@ describe("RBAC — matriz de permissões", () => {
   });
 });
 
-describe("Escopo — ownership e equipe", () => {
+describe("Escopo — ownership e empresa", () => {
   it("vendedor acessa apenas registros dos quais é responsável", () => {
     expect(canAccessOwned(sellerA1, recordOfA1)).toBe(true);
     expect(canAccessOwned(sellerA1, recordOfA2)).toBe(false);
     expect(canAccessOwned(sellerA1, recordOfB1)).toBe(false);
+    expect(hasCompanyScope(sellerA1)).toBe(false);
   });
 
-  it("supervisor acessa registros da própria equipe e nunca de outra", () => {
-    expect(canAccessOwned(supA, recordOfA1)).toBe(true);
-    expect(canAccessOwned(supA, recordOfA2)).toBe(true);
-    expect(canAccessOwned(supA, recordOfB1)).toBe(false);
-  });
-
-  it("supervisor sem equipe não acessa nada", () => {
-    expect(canAccessOwned(supWithoutTeam, recordOfA1)).toBe(false);
-    expect(canAccessOwned(supWithoutTeam, { ownerId: null, teamId: null })).toBe(false);
-    expect(canManageTeam(supWithoutTeam, null)).toBe(false);
-  });
-
-  it("administrador acessa tudo", () => {
-    expect(canAccessOwned(admin, recordOfB1)).toBe(true);
-    expect(canManageTeam(admin, "teamB")).toBe(true);
-  });
-
-  it("gestão de equipe: supervisor só a própria; vendedor nenhuma", () => {
-    expect(canManageTeam(supA, "teamA")).toBe(true);
-    expect(canManageTeam(supA, "teamB")).toBe(false);
-    expect(canManageTeam(sellerA1, "teamA")).toBe(false);
+  it("supervisor acessa registros de todas as equipes, como o administrador", () => {
+    for (const actor of [supA, supWithoutTeam, admin]) {
+      expect(canAccessOwned(actor, recordOfA1)).toBe(true);
+      expect(canAccessOwned(actor, recordOfB1)).toBe(true);
+      expect(canAccessOwned(actor, { ownerId: null, teamId: null })).toBe(true);
+      expect(hasCompanyScope(actor)).toBe(true);
+    }
   });
 });

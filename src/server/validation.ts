@@ -38,6 +38,3 @@ export const passwordSchema = z
   .min(PASSWORD_MIN_LENGTH, `A senha deve ter ao menos ${PASSWORD_MIN_LENGTH} caracteres.`)
   .max(PASSWORD_MAX_LENGTH, `A senha deve ter no máximo ${PASSWORD_MAX_LENGTH} caracteres.`)
   .refine((password) => !isCommonPassword(password), "Esta senha é muito comum ou previsível. Escolha outra.");
-
-/** Senha de quem executa uma operação sensível (reautenticação; conferida em assertActorPassword). */
-export const actorPasswordSchema = z.string().max(200).optional();

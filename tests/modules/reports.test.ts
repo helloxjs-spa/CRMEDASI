@@ -31,7 +31,7 @@ const ctx = (userId: string) => org.ctx(userId);
 const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: BUSINESS_RULES.timezone }).format(new Date());
 
 async function sale(sellerId: string, prices: number[], opts: { date?: string; card?: number; name?: string } = {}): Promise<string> {
-  const lead = await createLead(await ctx(sellerId), { name: opts.name ?? `Cliente Relatório ${seq + 1}`, phone: nextPhone(), interestCourseId: course });
+  const lead = await createLead(await ctx(sellerId), { name: opts.name ?? `Cliente Relatório ${seq + 1}`, phone: nextPhone(), source: "GOOGLE", interestCourseId: course });
   const input = {
     requestId: crypto.randomUUID(),
     leadId: lead.id,
@@ -75,23 +75,24 @@ describe("acesso", () => {
 });
 
 describe("vendas e itens", () => {
-  it("custo das bolsas e lucro só para o ADMIN (lucro = venda − custo)", async () => {
+  it("custo das bolsas e lucro para ADMIN e SUPERVISOR (lucro = venda − custo)", async () => {
     const admin = await report(org.ids.admin, "sales", JUL);
     expect(admin.header).toEqual(expect.arrayContaining(["Custo das bolsas", "Lucro"]));
     const a1 = admin.rows.find((row) => row[1] === "Aluno A1")!;
     expect(a1.slice(-2)).toEqual([{ cents: 80_000 }, { cents: 20_000 }]);
 
     const supervisor = await report(org.ids.supA, "sales", JUL);
-    expect(supervisor.header.join()).not.toMatch(/Custo|Lucro/);
-    expect(JSON.stringify(supervisor.rows)).not.toContain("80000");
+    expect(supervisor.header).toEqual(admin.header);
+    expect(supervisor.rows).toEqual(admin.rows);
     const items = await report(org.ids.supA, "items", JUL);
-    expect(items.header.join()).not.toMatch(/Custo|Lucro/);
+    expect(items.header).toEqual(expect.arrayContaining(["Custo da bolsa", "Lucro do item"]));
     expect((await report(org.ids.admin, "items", JUL)).header).toEqual(expect.arrayContaining(["Custo da bolsa", "Lucro do item"]));
   });
 
-  it("C50: o supervisor vê as vendas dos vendedores que estão HOJE na equipe, inclusive as anteriores à transferência", async () => {
-    expect(column(await report(org.ids.supA, "sales", JUL), "Lead").sort()).toEqual(["Aluno A1", expect.stringMatching(/^Cliente/)]);
-    expect(column(await report(org.ids.supB, "sales", JUL), "Lead").sort()).toEqual(["Aluno B1", "Aluno Migrante"]);
+  it("supervisor exporta as vendas de todas as equipes; a coluna de equipe é a registrada na venda", async () => {
+    const all = column(await report(org.ids.admin, "sales", JUL), "Lead").sort();
+    expect(column(await report(org.ids.supA, "sales", JUL), "Lead").sort()).toEqual(all);
+    expect(column(await report(org.ids.supB, "sales", JUL), "Lead").sort()).toEqual(all);
     // A coluna histórica continua mostrando a equipe registrada na venda.
     const migrantRow = (await report(org.ids.supB, "sales", JUL)).rows.find((row) => row[1] === "Aluno Migrante")!;
     expect(migrantRow[5]).toBe("Equipe A");
@@ -115,17 +116,17 @@ describe("comissões e desempenho", () => {
     ]);
     const total = commissions.rows.reduce((sum, row) => sum + (row[3] as { cents: number }).cents, 0);
     expect(total).toBe((await getSalesIndicators(await ctx(org.ids.admin), JUL)).commissionCents);
-    expect((await report(org.ids.supB, "commissions", JUL)).rows.map((row) => row[0])).toEqual(["Vendedor B1", "Vendedor Migrante"]);
+    expect((await report(org.ids.supB, "commissions", JUL)).rows).toEqual(commissions.rows);
   });
 
-  it("desempenho reutiliza o Ranking: equipes pela equipe atual (C50); supervisor vê os vendedores da equipe", async () => {
+  it("desempenho reutiliza o Ranking: equipes pela equipe atual (C50); supervisor vê todos os vendedores", async () => {
     const teams = await report(org.ids.admin, "performance", { ...JUL, view: "teams", criterion: "revenue" });
     expect(teams.rows.map((row) => [row[2], row[4], row[5]])).toEqual([
       ["Equipe B", 2, { cents: 250_000 }],
       ["Equipe A", 1, { cents: 100_000 }],
     ]);
     const sellers = await report(org.ids.supB, "performance", { ...JUL, view: "sellers", criterion: "count" });
-    expect(sellers.rows.map((row) => row[2]).sort()).toEqual(["Vendedor B1", "Vendedor Migrante"]);
+    expect(sellers.rows.map((row) => row[2]).sort()).toEqual(["Vendedor A1", "Vendedor B1", "Vendedor Migrante"]);
     await expect(report(org.ids.admin, "performance", { view: "teams", criterion: "revenue" })).rejects.toBeInstanceOf(ValidationError);
   });
 });
@@ -136,19 +137,19 @@ describe("leads, parcelas e certificados", () => {
     expect(all.rows.length).toBe(4);
     expect((await report(org.ids.admin, "leads", { dateFrom: "2020-01-01", dateTo: "2020-12-31" })).rows).toEqual([]);
     expect((await report(org.ids.admin, "leads", { status: "TRASHED" })).rows).toEqual([]);
-    expect(column(await report(org.ids.supB, "leads"), "Nome").sort()).toEqual(["Aluno B1"]);
+    expect(column(await report(org.ids.supB, "leads"), "Nome").sort()).toEqual(column(await report(org.ids.admin, "leads"), "Nome").sort());
   });
 
-  it("parcelas e certificados com o escopo do módulo", async () => {
+  it("parcelas e certificados: supervisores veem os da empresa toda", async () => {
     const installments = await report(org.ids.supB, "installments");
     expect(installments.rows.map((row) => [row[1], row[2], row[3], row[4]])).toEqual([
       ["Aluno Migrante", "1/2", { cents: 100_000 }, "Vencida"],
       ["Aluno Migrante", "2/2", { cents: 100_000 }, "Vencida"],
     ]);
-    expect((await report(org.ids.supA, "installments")).rows).toEqual([]);
+    expect((await report(org.ids.supA, "installments")).rows).toEqual(installments.rows);
 
     const certificates = await report(org.ids.supB, "certificates", { dateField: "completed", dateFrom: "2026-09-01", dateTo: "2026-09-30" });
     expect(certificates.rows.map((row) => [row[0], row[3], row[7]])).toEqual([["Aluno Migrante", "Vendedor Migrante", "Cert X"]]);
-    expect((await report(org.ids.supA, "certificates")).rows).toEqual([]);
+    expect((await report(org.ids.supA, "certificates")).rows).toEqual((await report(org.ids.admin, "certificates")).rows);
   });
 });

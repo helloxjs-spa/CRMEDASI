@@ -91,6 +91,15 @@ export function describeAuditEvent(event: { action: string; targetName?: string 
           ...(typeof m.movedLeads === "number" && m.movedLeads > 0 ? [`Leads movidos junto: ${m.movedLeads}`] : []),
         ],
       };
+    case "user.role_changed":
+      return {
+        target,
+        lines: [
+          `Perfil: ${ROLE_LABELS[m.fromRole as UserRole] ?? text(m.fromRole)} → ${ROLE_LABELS[m.toRole as UserRole] ?? text(m.toRole)}`,
+          ...(typeof m.fromTeamName === "string" ? [`Saiu da equipe: ${m.fromTeamName}`] : []),
+          ...(typeof m.toTeamName === "string" ? [`Equipe: ${m.toTeamName}`] : []),
+        ],
+      };
     case "team.supervisor_changed":
       return { target, lines: [`Supervisor: ${text(m.fromSupervisorName ?? "Sem supervisor")} → ${text(m.toSupervisorName ?? "Sem supervisor")}`] };
     case "course.created":

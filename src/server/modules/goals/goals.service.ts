@@ -5,7 +5,7 @@ import { goalProgress, monthStart, monthState, previousMonth, projectedMonthCent
 import { isValidMonth, monthRange } from "@/lib/ranking";
 import type { Actor } from "@/server/authz/actor";
 import { assertPermission, hasPermission } from "@/server/authz/permissions";
-import { canManageTeam } from "@/server/authz/scope";
+import { hasCompanyScope } from "@/server/authz/scope";
 import { BUSINESS_RULES } from "@/server/config/business-rules";
 import type { ServiceContext } from "@/server/context";
 import { sales, sellerGoals, teams, users } from "@/server/db/schema";
@@ -91,7 +91,7 @@ async function realizedBySeller(db: Database, month: string): Promise<Map<string
 
 function canEditSeller(actor: Actor, seller: { teamId: string | null; active: boolean }): boolean {
   if (!hasPermission(actor, "goals:manage") || !seller.active) return false;
-  return canManageTeam(actor, seller.teamId);
+  return hasCompanyScope(actor);
 }
 
 export async function getMonthlyGoals({ db, actor }: ServiceContext, input: unknown, now = new Date()): Promise<MonthlyGoals> {
@@ -159,7 +159,10 @@ export async function setSellerGoal({ db, actor }: ServiceContext, input: unknow
       .select({ name: users.name, teamId: users.teamId, active: users.active })
       .from(users)
       .where(and(eq(users.id, data.sellerId), eq(users.role, "SELLER")))
-      .limit(1);
+      .limit(1)
+      // FOR SHARE: uma mudança de perfil concorrente espera esta meta (e então
+      // a vê) ou termina antes (e esta leitura vê o perfil novo).
+      .for("share");
     if (!seller || !canEditSeller(actor, seller)) throw new NotFoundError();
 
     const [before] = await tx

@@ -1,6 +1,7 @@
 import type { LeadTimelineEntry } from "@/server/modules/leads/leads.service";
 import { formatRelativeDateTime } from "./format";
-import { STAGE_LABELS } from "./leads";
+import type { LeadSource } from "@/server/db/schema";
+import { SOURCE_LABELS, sourceLabel, STAGE_LABELS } from "./leads";
 import { formatPhone } from "./phone";
 
 /**
@@ -13,6 +14,17 @@ type CourseSnapshot = { name: string; institutionName: string };
 
 function isCourse(value: unknown): value is CourseSnapshot {
   return typeof value === "object" && value !== null && "name" in value && "institutionName" in value;
+}
+
+type SourceSnapshot = { source: LeadSource; detail: string | null };
+
+function isSource(value: unknown): value is SourceSnapshot {
+  return typeof value === "object" && value !== null && "source" in value && typeof value.source === "string" && value.source in SOURCE_LABELS;
+}
+
+/** Origem gravada no evento (null: lead sem origem, anterior à migration 015). */
+function sourceText(value: unknown): string {
+  return isSource(value) ? sourceLabel({ source: value.source, sourceDetail: value.detail }) : sourceLabel({ source: null, sourceDetail: null });
 }
 
 function change(metadata: Record<string, unknown>, key: string): { from: unknown; to: unknown } | null {
@@ -32,6 +44,8 @@ function detailsLines(metadata: Record<string, unknown>): string[] {
       `Curso: ${course.from.name} — ${course.from.institutionName} → ${course.to.name} — ${course.to.institutionName}`,
     );
   }
+  const source = change(metadata, "source");
+  if (source) lines.push(`Origem: ${sourceText(source.from)} → ${sourceText(source.to)}`);
   return lines;
 }
 
@@ -59,7 +73,7 @@ export function describeLeadEvent(event: LeadTimelineEntry, now: Date = new Date
       };
     case "REDISTRIBUTED":
       return {
-        title: "Redistribuído em Retrabalho",
+        title: "Redistribuído (novo ciclo)",
         lines: [`${fromOwner} → ${owner}`, ...teamMove, `Novo ciclo de atendimento: ${event.cycleNumber}`],
       };
     case "TRASHED":
@@ -67,7 +81,7 @@ export function describeLeadEvent(event: LeadTimelineEntry, now: Date = new Date
     case "RESTORED":
       return {
         title: "Recuperado da Lixeira",
-        lines: [`Retrabalho com ${owner}`, ...teamMove, `Novo ciclo de atendimento: ${event.cycleNumber}`],
+        lines: [`Em contato com ${owner}`, ...teamMove, `Novo ciclo de atendimento: ${event.cycleNumber}`],
       };
     case "NOTE_ADDED": {
       const renewed = typeof event.metadata.renewedDueAt === "string" ? event.metadata.renewedDueAt : null;

@@ -35,7 +35,7 @@ const nextPhone = () => `(79) 91${String(++seq).padStart(7, "0")}`;
 const ctx = (userId: string) => org.ctx(userId);
 
 async function lead(sellerId: string): Promise<string> {
-  return (await createLead(await ctx(sellerId), { name: `Cliente Painel ${seq}`, phone: nextPhone(), interestCourseId: course })).id;
+  return (await createLead(await ctx(sellerId), { name: `Cliente Painel ${seq}`, phone: nextPhone(), source: "GOOGLE", interestCourseId: course })).id;
 }
 /** Venda registrada pelo ADMIN (que informa a data). */
 async function sale(leadId: string, sellerId: string, saleDate: string, prices: number[]): Promise<string> {
@@ -94,12 +94,11 @@ describe("vendas: válidas, pela data da venda, com itens removidos fora", () =>
     });
   });
 
-  it("SUPERVISOR: vendedores atuais da equipe, com as vendas anteriores à transferência (C50); sem custo nem lucro", async () => {
-    // A2 foi para a B: a venda de L4 (registrada na A) passa para o escopo da B.
-    const supA = await getSalesIndicators(await ctx(org.ids.supA), JUL);
-    expect(supA).toEqual({ salesCount: 2, revenueCents: 300_000, commissionCents: 20_000 });
-    expect(await getSalesIndicators(await ctx(org.ids.supB), JUL)).toEqual({ salesCount: 2, revenueCents: 230_000, commissionCents: 20_000 });
-    expect(JSON.stringify(supA)).not.toMatch(/cost|profit|finance|margin/i);
+  it("SUPERVISOR: os mesmos números do ADMIN (empresa toda), com custo e lucro", async () => {
+    const admin = await getSalesIndicators(await ctx(org.ids.admin), JUL);
+    expect(admin.finance).toBeDefined();
+    expect(await getSalesIndicators(await ctx(org.ids.supA), JUL)).toEqual(admin);
+    expect(await getSalesIndicators(await ctx(org.ids.supB), JUL)).toEqual(admin);
   });
 
   it("SELLER: só as vendas de que é responsável; estornada não conta; sem custo nem lucro", async () => {
@@ -117,13 +116,12 @@ describe("vendas: válidas, pela data da venda, com itens removidos fora", () =>
 describe("leads: cadastrados no período × carteira atual × conversão", () => {
   it("conversão conta cada lead uma vez (L1 comprou 2x) e ignora venda estornada (L2)", async () => {
     expect(await getLeadIndicators(await ctx(org.ids.sellerA1), NOW)).toMatchObject({ createdInPeriod: 4, convertedInPeriod: 1, conversionRate: 25 });
-    // Escopo atual de leads (o de listLeads). Na troca de equipe só os leads em
-    // aberto acompanham o vendedor (C4): L4, em Fechamento, continua na equipe A.
-    expect(await getLeadIndicators(await ctx(org.ids.supA), NOW)).toMatchObject({ createdInPeriod: 5, convertedInPeriod: 2, conversionRate: 40 });
-    expect(await getLeadIndicators(await ctx(org.ids.supB), NOW)).toMatchObject({ createdInPeriod: 2, convertedInPeriod: 2, conversionRate: 100 });
     const admin = await getLeadIndicators(await ctx(org.ids.admin), NOW);
     expect(admin).toMatchObject({ createdInPeriod: 7, convertedInPeriod: 4 });
     expect(admin.conversionRate).toBeCloseTo(57.142857, 5);
+    // Supervisor: escopo da empresa, os mesmos números do ADMIN.
+    expect(await getLeadIndicators(await ctx(org.ids.supA), NOW)).toEqual(admin);
+    expect(await getLeadIndicators(await ctx(org.ids.supB), NOW)).toEqual(admin);
   });
 
   it("sem leads cadastrados no período: conversão indisponível (null), não 0%", async () => {
@@ -137,18 +135,16 @@ describe("leads: cadastrados no período × carteira atual × conversão", () =>
     expect(a1.portfolio.map((p) => p.stage)[0]).toBe("NEW");
   });
 
-  it("alertas no escopo: vendedor sem fila de decisão; supervisor com Follow-up 3 vencido", async () => {
+  it("alertas no escopo: vendedor sem fila de decisão; FUP 3 vencido conta só como follow-up vencido", async () => {
     expect((await getLeadIndicators(await ctx(org.ids.sellerA1), NOW)).alerts).toEqual({
       followUpsOverdue: 2,
       negotiationsOverdue: 1,
       awaitingDecision: null,
     });
-    expect((await getLeadIndicators(await ctx(org.ids.supA), NOW)).alerts).toEqual({
-      followUpsOverdue: 2,
-      negotiationsOverdue: 1,
-      awaitingDecision: { unassigned: 0, followUp3Expired: 1 },
-    });
-    expect((await getLeadIndicators(await ctx(org.ids.supB), NOW)).alerts).toMatchObject({ followUpsOverdue: 0, negotiationsOverdue: 0 });
+    const adminAlerts = (await getLeadIndicators(await ctx(org.ids.admin), NOW)).alerts;
+    expect(adminAlerts.awaitingDecision).toEqual({ unassigned: 0 });
+    expect((await getLeadIndicators(await ctx(org.ids.supA), NOW)).alerts).toEqual(adminAlerts);
+    expect((await getLeadIndicators(await ctx(org.ids.supB), NOW)).alerts).toEqual(adminAlerts);
   });
 });
 
@@ -172,10 +168,11 @@ describe("comparação mês a mês (ADMIN)", () => {
     expect(rows.find((r) => r.month === "2026-01")).toMatchObject({ salesCount: 0, revenueCents: 0, change: { revenueCents: null } });
   });
 
-  it("SUPERVISOR e SELLER não acessam (custo e lucro)", async () => {
-    for (const userId of [org.ids.supA, org.ids.sellerA1]) {
-      await expect(getMonthlyComparison(await ctx(userId), { endMonth: "2026-08" })).rejects.toBeInstanceOf(ForbiddenError);
-    }
+  it("SUPERVISOR acessa como o ADMIN; SELLER não (custo e lucro)", async () => {
+    expect(await getMonthlyComparison(await ctx(org.ids.supA), { endMonth: "2026-08" })).toEqual(
+      await getMonthlyComparison(await ctx(org.ids.admin), { endMonth: "2026-08" }),
+    );
+    await expect(getMonthlyComparison(await ctx(org.ids.sellerA1), { endMonth: "2026-08" })).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it("mês inválido é recusado", async () => {
@@ -185,7 +182,7 @@ describe("comparação mês a mês (ADMIN)", () => {
 
 // Por último: cria vendas e leads novos que os cenários acima não consideram.
 describe("vendedor sem equipe atual (C50)", () => {
-  it("ADMIN mantém as vendas nos totais globais; nenhum supervisor as vê; o vendedor vê as próprias", async () => {
+  it("ADMIN e supervisores mantêm as vendas nos totais globais; o vendedor vê as próprias", async () => {
     const MAR = { dateFrom: "2026-03-01", dateTo: "2026-03-31" };
     const loose = await insertUser(handle, { name: "Vendedor Sem Equipe Painel", role: "SELLER", teamId: org.ids.teamB });
     await sale(await lead(loose), loose, "2026-03-10", [60_000]);
@@ -198,7 +195,7 @@ describe("vendedor sem equipe atual (C50)", () => {
       finance: { costCents: 40_000, profitCents: 20_000 },
     });
     for (const supervisor of [org.ids.supA, org.ids.supB]) {
-      expect(await getSalesIndicators(await ctx(supervisor), MAR)).toEqual({ salesCount: 0, revenueCents: 0, commissionCents: 0 });
+      expect(await getSalesIndicators(await ctx(supervisor), MAR)).toMatchObject({ salesCount: 1, revenueCents: 60_000 });
     }
     expect(await getSalesIndicators(await ctx(loose), MAR)).toEqual({ salesCount: 1, revenueCents: 60_000, commissionCents: 10_000 });
   });

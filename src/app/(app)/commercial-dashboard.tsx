@@ -45,7 +45,7 @@ export async function CommercialDashboard({
     getLeadIndicators(ctx, range),
     isSeller ? getRanking(ctx, { view: "sellers", criterion: "count", ...range }) : Promise.resolve(null),
     getRanking(ctx, { view: "sellers", criterion: "revenue", ...range }),
-    actor.role === "ADMIN" ? getRanking(ctx, { view: "teams", criterion: "revenue", ...range }) : Promise.resolve(null),
+    !isSeller ? getRanking(ctx, { view: "teams", criterion: "revenue", ...range }) : Promise.resolve(null),
     seesFinance ? getMonthlyComparison(ctx, { endMonth: currentMonth }) : Promise.resolve(null),
   ]);
 
@@ -211,7 +211,6 @@ function LeadSection({ indicators, period }: { indicators: LeadIndicators; perio
             <AlertRow label="Negociações vencidas" value={alerts.negotiationsOverdue} />
             {alerts.awaitingDecision && (
               <>
-                <AlertRow label="Follow-up 3 vencido aguardando decisão" value={alerts.awaitingDecision.followUp3Expired} />
                 <AlertRow label="Leads sem responsável (fila)" value={alerts.awaitingDecision.unassigned} />
               </>
             )}

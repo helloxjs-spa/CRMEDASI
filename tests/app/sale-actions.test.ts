@@ -61,7 +61,7 @@ async function as(userId: string) {
 const ctx = (userId: string) => org.ctx(userId);
 
 async function newLead(sellerId: string, name = `Cliente ${++seq}`): Promise<string> {
-  return (await createLead(await ctx(sellerId), { name, phone: `(79) 94${String(++seq).padStart(7, "0")}`, interestCourseId: course })).id;
+  return (await createLead(await ctx(sellerId), { name, phone: `(79) 94${String(++seq).padStart(7, "0")}`, source: "GOOGLE", interestCourseId: course })).id;
 }
 
 const saleRow = async (id: string) => (await handle.db.select().from(sales).where(eq(sales.id, id)))[0];
@@ -394,12 +394,11 @@ describe("edição pela action", () => {
     });
   });
 
-  it("venda de outra equipe: inexistente para o supervisor", async () => {
+  it("venda de outra equipe: o supervisor edita (escopo da empresa)", async () => {
     const { saleId, version } = await saleOfA1();
     await as(org.ids.supB);
     expect(await actions.updateSaleAction(IDLE, form({ saleId, expectedVersion: String(version), addCourseId: [course], addPrice: ["1,00"] }))).toMatchObject({
-      status: "error",
-      message: NOT_FOUND,
+      status: "success",
     });
   });
 });
@@ -421,7 +420,7 @@ describe("estorno e reativação pela action", () => {
     const reversed = await actions.reverseSaleAction(IDLE, form({ saleId, expectedVersion: String(version), reason: "Cliente desistiu" }));
     expect(reversed).toMatchObject({
       status: "success",
-      message: "Venda estornada. O lead voltou para Lead cadastrado, com o mesmo responsável, em um novo ciclo.",
+      message: "Venda estornada. O lead voltou para Em contato, com o mesmo responsável, em um novo ciclo.",
     });
     expect(await saleRow(saleId)).toMatchObject({ status: "REVERSED" });
     expect(await leadRow(leadId)).toMatchObject({ stage: "NEW", ownerId: org.ids.sellerA1 });
@@ -450,7 +449,7 @@ describe("estorno e reativação pela action", () => {
     });
     expect(await actions.reactivateSaleAction(IDLE, form({ saleId, expectedVersion: String(afterReverse.version), reason: "Pagamento confirmado" }))).toMatchObject({
       status: "success",
-      message: "Venda reativada. O lead está em Fechamento com o responsável da venda.",
+      message: "Venda reativada. O lead está em Vendido com o responsável da venda.",
     });
     expect(await leadRow(leadId)).toMatchObject({ stage: "CLOSED", ownerId: org.ids.sellerA1 });
     const types = (await handle.db.select({ type: leadEvents.type }).from(leadEvents).where(eq(leadEvents.saleId, saleId))).map((e) => e.type);
@@ -463,7 +462,7 @@ describe("estorno e reativação pela action", () => {
     await as(org.ids.supA);
     expect(await actions.reverseSaleAction(IDLE, form({ saleId, expectedVersion: String(version), reason: "Duplicada" }))).toMatchObject({
       status: "success",
-      message: "Venda estornada. O lead continua em Fechamento porque tem outra venda válida.",
+      message: "Venda estornada. O lead continua em Vendido porque tem outra venda válida.",
     });
     expect(await leadRow(leadId)).toMatchObject({ stage: "CLOSED" });
   });
@@ -491,12 +490,15 @@ describe("estorno e reativação pela action", () => {
     }
   });
 
-  it("venda fora do escopo: inexistente", async () => {
+  it("venda de outra equipe: o supervisor estorna; o vendedor de outra equipe não enxerga", async () => {
     const { saleId, version } = await saleOfA1();
-    await as(org.ids.supB);
+    await as(org.ids.sellerB1);
     expect(await actions.reverseSaleAction(IDLE, form({ saleId, expectedVersion: String(version), reason: "x" }))).toMatchObject({
       status: "error",
-      message: NOT_FOUND,
+    });
+    await as(org.ids.supB);
+    expect(await actions.reverseSaleAction(IDLE, form({ saleId, expectedVersion: String(version), reason: "x" }))).toMatchObject({
+      status: "success",
     });
   });
 });
@@ -527,14 +529,15 @@ describe("leituras de apoio à tela", () => {
     expect((await listSales(sellerCtx, { sellerId: org.ids.sellerA1 })).total).toBe(0);
   });
 
-  it("histórico com nomes resolvidos; custo de bolsa só para o ADMIN", async () => {
+  it("histórico com nomes resolvidos; custo de bolsa para ADMIN e SUPERVISOR, nunca para o vendedor", async () => {
     const { saleId } = await saleOfA1();
     const forSup = await getSaleHistoryView(await ctx(org.ids.supA), saleId);
     expect(forSup.names).toMatchObject({ [org.ids.sellerA1]: "Vendedor A1", [org.ids.teamA]: "Equipe A", [course]: "Pedagogia" });
-    expect(JSON.stringify(forSup)).not.toContain("costSnapshotCents");
+    expect(JSON.stringify(forSup)).toContain("costSnapshotCents");
     const forAdmin = await getSaleHistoryView(await ctx(org.ids.admin), saleId);
     expect(JSON.stringify(forAdmin)).toContain("costSnapshotCents");
-    await expect(getSaleHistoryView(await ctx(org.ids.supB), saleId)).rejects.toThrow(NOT_FOUND);
+    expect(JSON.stringify(await getSaleHistoryView(await ctx(org.ids.sellerA1), saleId))).not.toContain("costSnapshotCents");
+    await expect(getSaleHistoryView(await ctx(org.ids.sellerB1), saleId)).rejects.toThrow(NOT_FOUND);
   });
 
   it("vendedores oferecidos: SELLER só a própria equipe; SUPERVISOR e ADMIN, ativos de equipes ativas", async () => {

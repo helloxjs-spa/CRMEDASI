@@ -31,6 +31,8 @@ export async function createLeadAction(_prev: ActionState, formData: FormData): 
       name: text(formData, "name"),
       phone: text(formData, "phone"),
       interestCourseId: text(formData, "interestCourseId"),
+      source: text(formData, "source"),
+      sourceDetail: text(formData, "sourceDetail"),
       sellerId: text(formData, "sellerId") || undefined,
     });
     revalidateLeadViews();
@@ -44,6 +46,9 @@ export async function editLeadAction(_prev: ActionState, formData: FormData): Pr
       name: text(formData, "name"),
       phone: text(formData, "phone"),
       interestCourseId: text(formData, "interestCourseId"),
+      // Sempre enviada: na edição de um lead sem origem (anterior à 015), passa a ser exigida.
+      source: text(formData, "source"),
+      sourceDetail: text(formData, "sourceDetail"),
     });
     revalidateLeadViews();
     return "Dados do lead salvos.";
@@ -70,7 +75,7 @@ export async function redistributeLeadAction(_prev: ActionState, formData: FormD
   return runAction(async (ctx) => {
     await redistributeLead(ctx, text(formData, "leadId"), { toSellerId: text(formData, "toSellerId") });
     revalidateLeadViews();
-    return "Lead redistribuído em Retrabalho, com um novo ciclo.";
+    return "Lead redistribuído: volta para Em contato, com um novo ciclo.";
   });
 }
 
@@ -78,7 +83,7 @@ export async function trashLeadAction(_prev: ActionState, formData: FormData): P
   return runAction(async (ctx) => {
     await trashLead(ctx, text(formData, "leadId"));
     revalidateLeadViews();
-    return "Lead enviado para a Lixeira.";
+    return "Lead marcado como Perdido (Lixeira).";
   });
 }
 
@@ -86,7 +91,7 @@ export async function restoreLeadAction(_prev: ActionState, formData: FormData):
   return runAction(async (ctx) => {
     await restoreLead(ctx, text(formData, "leadId"), { toSellerId: text(formData, "toSellerId") });
     revalidateLeadViews();
-    return "Lead recuperado em Retrabalho, com um novo ciclo.";
+    return "Lead recuperado: volta para Em contato, com um novo ciclo.";
   });
 }
 

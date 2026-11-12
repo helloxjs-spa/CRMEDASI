@@ -24,7 +24,7 @@ const nextPhone = () => `(79) 92${String(++seq).padStart(7, "0")}`;
 const ctx = (userId: string) => org.ctx(userId);
 
 async function newSale(sellerId: string): Promise<string> {
-  const lead = await createLead(await ctx(sellerId), { name: `Cliente Estorno ${seq}`, phone: nextPhone(), interestCourseId: course });
+  const lead = await createLead(await ctx(sellerId), { name: `Cliente Estorno ${seq}`, phone: nextPhone(), source: "GOOGLE", interestCourseId: course });
   return (await createSale(await ctx(sellerId), saleInput(lead.id, course))).saleId;
 }
 const version = async (saleId: string) => (await getSale(await ctx(org.ids.admin), saleId)).version;
@@ -95,9 +95,9 @@ describe("limites de acesso (mesmo escopo de listSales)", () => {
     expect((await reversedList(org.ids.sellerB1)).items.map((s) => s.id)).toEqual([reversedOfB1]);
   });
 
-  it("SUPERVISOR vê só os estornos dos vendedores da equipe; ADMIN vê todos", async () => {
-    expect((await reversedList(org.ids.supA)).items.map((s) => s.id)).toEqual([reversedTwice]);
-    expect((await reversedList(org.ids.supB)).items.map((s) => s.id)).toEqual([reversedOfB1]);
+  it("SUPERVISOR e ADMIN veem os estornos de todas as equipes", async () => {
+    expect((await reversedList(org.ids.supA)).total).toBe(2);
+    expect((await reversedList(org.ids.supB)).total).toBe(2);
     expect((await reversedList(org.ids.admin)).total).toBe(2);
   });
 

@@ -77,7 +77,7 @@ async function ctx(userId: string): Promise<ServiceContext> {
 
 async function newLead(seller: ServiceContext): Promise<string> {
   const phone = `5579${String(900000000 + ++seq).slice(0, 9)}`;
-  const lead = await createLead(seller, { name: `Lead ${seq}`, phone, interestCourseId: COURSE });
+  const lead = await createLead(seller, { name: `Lead ${seq}`, phone, source: "GOOGLE", interestCourseId: COURSE });
   return lead.id;
 }
 

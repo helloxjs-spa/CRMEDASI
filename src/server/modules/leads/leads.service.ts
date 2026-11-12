@@ -1,18 +1,28 @@
-import { and, asc, count, desc, eq, ilike, isNotNull, isNull, like, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, isNotNull, isNull, like, lt, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { parseBrazilianPhone, phoneSearchDigits } from "@/lib/phone";
-import { hitBuckets, isBucketFull, type Bucket } from "@/server/auth/rate-limit";
 import { conversionRate } from "@/lib/dashboard";
-import { canTransition, LEAD_PAGE_SIZES, STAGE_LABELS, STAGE_ORDER, STAGES_WITH_DEADLINE, type LeadQueueReason } from "@/lib/leads";
+import {
+  canTransition,
+  isFollowUp3Expired,
+  LEAD_PAGE_SIZES,
+  SOURCE_DETAIL_MAX_LENGTH,
+  SOURCE_WITH_DETAIL,
+  STAGE_LABELS,
+  STAGE_ORDER,
+  stageDeadlineHours,
+  type LeadQueueReason,
+} from "@/lib/leads";
 import type { Actor } from "@/server/authz/actor";
 import { assertPermission, hasPermission } from "@/server/authz/permissions";
-import { ownedScope } from "@/server/authz/scope";
+import { hasCompanyScope, ownedScope } from "@/server/authz/scope";
 import { BUSINESS_RULES } from "@/server/config/business-rules";
 import type { ServiceContext } from "@/server/context";
 import { isUniqueViolation } from "@/server/db/errors";
 import {
   courses,
+  LEAD_SOURCES,
   LEAD_STAGES,
   LEAD_STATUSES,
   leadCycles,
@@ -24,6 +34,7 @@ import {
   users,
   type LeadCycleKind,
   type LeadEventType,
+  type LeadSource,
   type LeadStage,
   type LeadStatus,
   type LeadUnassignedReason,
@@ -59,6 +70,10 @@ export type LeadView = {
   interestCourseId: string;
   interestCourseName: string;
   interestCourseInstitution: string;
+  /** Origem (null: lead anterior à migration 015, ainda não editado). */
+  source: LeadSource | null;
+  /** Nome da campanha; só em OTHER_CAMPAIGN. */
+  sourceDetail: string | null;
   ownerId: string | null;
   ownerName: string | null;
   teamId: string;
@@ -76,7 +91,7 @@ export type LeadView = {
   createdAt: Date;
   /**
    * Lead que aguarda decisão do supervisor: sem responsável (vendedor
-   * desativado) ou com Follow-up 3 vencido. Calculado a cada leitura.
+   * desativado). FUP 3 vencido não entra na fila (C59). Calculado a cada leitura.
    */
   queueReason: LeadQueueReason | null;
 };
@@ -85,7 +100,7 @@ export type { LeadQueueReason };
 
 export type Paginated<T> = { items: T[]; page: number; pageSize: number; total: number; totalPages: number };
 
-export type DecisionQueueCounts = { unassigned: number; followUp3Expired: number };
+export type DecisionQueueCounts = { unassigned: number };
 
 /** Vendedor no escopo do ator (filtro por vendedor e escolha de destino). */
 export type LeadSellerOption = { id: string; name: string; active: boolean; teamId: string | null; teamName: string | null };
@@ -145,25 +160,6 @@ export class LeadAlreadyExistsError extends ConflictError {
 }
 
 
-/** Vendedor que esbarrou em telefones já cadastrados vezes demais na janela de 15 minutos. */
-export const PHONE_LOOKUP_LIMITED = "Muitos telefones já cadastrados em pouco tempo. Aguarde alguns minutos ou procure o supervisor.";
-const PHONE_LOOKUP_LIMIT = 20;
-
-/**
- * A resposta de telefone duplicado revela quem atende o lead (C9), então o
- * vendedor não pode usá-la para varrer uma lista de números. SUPERVISOR e ADMIN
- * não têm esse limite.
- */
-const phoneLookupBucket = (actor: Actor): Bucket => ({ key: `phone-lookup:${actor.userId}`, limit: PHONE_LOOKUP_LIMIT });
-
-async function assertPhoneLookupAllowed(db: Database, actor: Actor): Promise<void> {
-  if (actor.role === "SELLER" && (await isBucketFull(db, phoneLookupBucket(actor)))) throw new ConflictError(PHONE_LOOKUP_LIMITED);
-}
-
-async function countPhoneLookup(db: Database, actor: Actor): Promise<void> {
-  if (actor.role === "SELLER") await hitBuckets(db, [phoneLookupBucket(actor)]);
-}
-
 /** Cadastro de lead por vendedor cuja equipe está inativa. */
 export const OWN_TEAM_INACTIVE = "Sua equipe está inativa. Procure o administrador.";
 
@@ -171,10 +167,6 @@ export const OWN_TEAM_INACTIVE = "Sua equipe está inativa. Procure o administra
 export const LEAD_SELLER_REQUIRED = "Selecione o vendedor responsável pelo lead.";
 /** SELLER só cadastra leads na própria carteira. */
 export const LEAD_SELLER_SELF_ONLY = "Você cadastra leads apenas na sua carteira.";
-
-/** Lead com Follow-up 3 vencido: somente leitura para o vendedor (C27/C32). */
-export const AWAITING_SUPERVISOR_MESSAGE =
-  "Este lead aguarda a decisão do supervisor (Follow-up 3 vencido). Você pode consultá-lo, mas não alterá-lo.";
 
 /**
  * Vendedor com negociação vencida: não cadastra leads nem movimenta outros
@@ -208,24 +200,55 @@ const phoneSchema = z
     return parsed.phone;
   });
 
-const createLeadSchema = z.strictObject({
-  name: nameSchema,
-  phone: phoneSchema,
-  interestCourseId: idSchema,
-  /** Vendedor responsável: obrigatório para SUPERVISOR/ADMIN; o SELLER cadastra para si (C41). */
-  sellerId: idSchema.optional(),
-});
+const sourceSchema = z.enum(LEAD_SOURCES, { error: "Selecione a origem do lead." });
+
+/** Nome da campanha: considerado só em OTHER_CAMPAIGN (nas demais origens é descartado). */
+const sourceDetailSchema = z
+  .string()
+  .trim()
+  .max(SOURCE_DETAIL_MAX_LENGTH, `Use no máximo ${SOURCE_DETAIL_MAX_LENGTH} caracteres.`)
+  .optional();
+
+const SOURCE_DETAIL_REQUIRED = "Informe qual foi a campanha.";
+
+function requireCampaignName(data: { source?: LeadSource; sourceDetail?: string }, ctx: z.RefinementCtx) {
+  if (data.source === SOURCE_WITH_DETAIL && !data.sourceDetail) {
+    ctx.addIssue({ code: "custom", path: ["sourceDetail"], message: SOURCE_DETAIL_REQUIRED });
+  }
+}
+
+/** Valor gravado em leads.source_detail (CHECK leads_source_detail_consistent). */
+function sourceDetailOf(source: LeadSource, detail: string | undefined): string | null {
+  return source === SOURCE_WITH_DETAIL ? (detail ?? null) : null;
+}
+
+const createLeadSchema = z
+  .strictObject({
+    name: nameSchema,
+    phone: phoneSchema,
+    interestCourseId: idSchema,
+    /** Origem do lead: obrigatória (migration 015). */
+    source: sourceSchema,
+    sourceDetail: sourceDetailSchema,
+    /** Vendedor responsável: obrigatório para SUPERVISOR/ADMIN; o SELLER cadastra para si (C41). */
+    sellerId: idSchema.optional(),
+  })
+  .superRefine(requireCampaignName);
 
 /**
- * Edição: só nome, telefone e curso de interesse. Responsável, equipe, etapa,
- * situação, ciclo, prazos e Lixeira têm operações próprias (campos não
+ * Edição: só nome, telefone, curso de interesse e origem. Responsável, equipe,
+ * etapa, situação, ciclo, prazos e Lixeira têm operações próprias (campos não
  * previstos são recusados).
  */
-const editLeadSchema = z.strictObject({
-  name: nameSchema.optional(),
-  phone: phoneSchema.optional(),
-  interestCourseId: idSchema.optional(),
-});
+const editLeadSchema = z
+  .strictObject({
+    name: nameSchema.optional(),
+    phone: phoneSchema.optional(),
+    interestCourseId: idSchema.optional(),
+    source: sourceSchema.optional(),
+    sourceDetail: sourceDetailSchema,
+  })
+  .superRefine(requireCampaignName);
 
 const sellerChoiceSchema = z.strictObject({ toSellerId: idSchema });
 
@@ -240,11 +263,13 @@ const listFiltersSchema = z.strictObject({
   pageSize: z.union(LEAD_PAGE_SIZES.map((size) => z.literal(size))).optional(),
   status: z.enum(LEAD_STATUSES).optional(),
   stage: z.enum(LEAD_STAGES).optional(),
+  /** Várias etapas (Kanban: a coluna "Em contato" inclui REWORK). Combina com `stage`. */
+  stages: z.array(z.enum(LEAD_STAGES)).min(1).max(LEAD_STAGES.length).optional(),
   courseId: idSchema.optional(),
   ownerId: idSchema.optional(),
   teamId: idSchema.optional(),
   /** Fila de decisão (SUPERVISOR/ADMIN): todos os motivos ou um deles. */
-  queue: z.enum(["ALL", "UNASSIGNED", "FOLLOW_UP_3_EXPIRED"]).optional(),
+  queue: z.enum(["ALL", "UNASSIGNED"]).optional(),
   /** Nome ou trecho do telefone (aceita o telefone formatado). */
   search: z.string().trim().max(120).optional(),
   /** "deadline": prazo mais próximo primeiro (Kanban); padrão: mais recentes. */
@@ -277,6 +302,8 @@ const leadView = {
   interestCourseId: leads.interestCourseId,
   interestCourseName: courses.name,
   interestCourseInstitution: courses.institutionName,
+  source: leads.source,
+  sourceDetail: leads.sourceDetail,
   ownerId: leads.ownerId,
   ownerName: owner.name,
   teamId: leads.teamId,
@@ -296,26 +323,16 @@ const leadView = {
 /** Condições da fila de decisão (sempre combinadas com o escopo). */
 const queueConditions = {
   UNASSIGNED: and(eq(leads.status, "ACTIVE"), isNull(leads.ownerId)),
-  FOLLOW_UP_3_EXPIRED: and(
-    eq(leads.status, "ACTIVE"),
-    isNotNull(leads.ownerId),
-    eq(leads.stage, "FOLLOW_UP_3"),
-    lt(leads.stageDueAt, sql`now()`),
-  ),
 };
 
-type QueueFields = { status: LeadStatus; ownerId: string | null; stage: LeadStage; stageDueAt: Date | null };
+type QueueFields = { status: LeadStatus; ownerId: string | null };
 
-function queueReasonOf(lead: QueueFields, now: Date): LeadQueueReason | null {
-  if (lead.status !== "ACTIVE") return null;
-  if (lead.ownerId === null) return "UNASSIGNED";
-  if (lead.stage === "FOLLOW_UP_3" && lead.stageDueAt !== null && lead.stageDueAt < now) return "FOLLOW_UP_3_EXPIRED";
-  return null;
+function queueReasonOf(lead: QueueFields): LeadQueueReason | null {
+  return lead.status === "ACTIVE" && lead.ownerId === null ? "UNASSIGNED" : null;
 }
 
 function withQueueReason<T extends QueueFields>(rows: T[]): (T & { queueReason: LeadQueueReason | null })[] {
-  const now = new Date();
-  return rows.map((row) => ({ ...row, queueReason: queueReasonOf(row, now) }));
+  return rows.map((row) => ({ ...row, queueReason: queueReasonOf(row) }));
 }
 
 function selectLeadViews(db: Database) {
@@ -344,6 +361,8 @@ async function lockLead(db: Database, id: string, scope: SQL | undefined) {
       name: leads.name,
       phone: leads.phone,
       interestCourseId: leads.interestCourseId,
+      source: leads.source,
+      sourceDetail: leads.sourceDetail,
       ownerId: leads.ownerId,
       teamId: leads.teamId,
       stage: leads.stage,
@@ -455,9 +474,9 @@ async function loadTargetSeller(
     seller?.role === "SELLER" &&
     seller.active &&
     seller.teamId !== null &&
-    (actor.role === "ADMIN" || seller.teamId === actor.supervisedTeamId);
+    hasCompanyScope(actor);
   if (!allowed) {
-    const message = actor.role === "ADMIN" ? "Selecione um vendedor ativo." : "Selecione um vendedor ativo da sua equipe.";
+    const message = "Selecione um vendedor ativo.";
     throw new ValidationError(message, { [field]: [message] });
   }
   if (!seller.teamActive) throw new ValidationError(TARGET_TEAM_INACTIVE, { [field]: [TARGET_TEAM_INACTIVE] });
@@ -492,17 +511,14 @@ export async function listLeads({ db, actor }: ServiceContext, rawFilters: unkno
   const conditions: (SQL | undefined)[] = [leadScope(actor)];
   if (filters.status) conditions.push(eq(leads.status, filters.status));
   if (filters.stage) conditions.push(eq(leads.stage, filters.stage));
+  if (filters.stages) conditions.push(inArray(leads.stage, filters.stages));
   if (filters.courseId) conditions.push(eq(leads.interestCourseId, filters.courseId));
   if (filters.ownerId) conditions.push(eq(leads.ownerId, filters.ownerId));
   if (filters.teamId) conditions.push(eq(leads.teamId, filters.teamId));
   const createdDay = sql`(${leads.createdAt} at time zone ${BUSINESS_RULES.timezone})::date`;
   if (filters.createdFrom) conditions.push(sql`${createdDay} >= ${filters.createdFrom}::date`);
   if (filters.createdTo) conditions.push(sql`${createdDay} <= ${filters.createdTo}::date`);
-  if (filters.queue) {
-    conditions.push(
-      filters.queue === "ALL" ? or(queueConditions.UNASSIGNED, queueConditions.FOLLOW_UP_3_EXPIRED) : queueConditions[filters.queue],
-    );
-  }
+  if (filters.queue) conditions.push(queueConditions.UNASSIGNED);
   if (filters.search) {
     const term = `%${filters.search.replace(/[%_\\]/g, "\\$&")}%`;
     const digits = phoneSearchDigits(filters.search);
@@ -590,8 +606,7 @@ export async function getLeadTimeline(ctx: ServiceContext, rawId: unknown): Prom
 
 /**
  * Contagem da fila de decisão do supervisor (ADMIN: todas as equipes): leads
- * sem responsável (vendedor desativado) e com Follow-up 3 vencido. Nada é
- * gravado quando o prazo vence: a fila é calculada a partir de stage_due_at.
+ * sem responsável (vendedor desativado). FUP 3 vencido não entra na fila (C59).
  * Os itens vêm de listLeads({ queue }).
  */
 export async function countDecisionQueue({ db, actor }: ServiceContext): Promise<DecisionQueueCounts> {
@@ -599,7 +614,6 @@ export async function countDecisionQueue({ db, actor }: ServiceContext): Promise
   const [row] = await db
     .select({
       unassigned: sql<number>`count(*) filter (where ${queueConditions.UNASSIGNED})`.mapWith(Number),
-      followUp3Expired: sql<number>`count(*) filter (where ${queueConditions.FOLLOW_UP_3_EXPIRED})`.mapWith(Number),
     })
     .from(leads)
     .where(leadScope(actor));
@@ -608,18 +622,17 @@ export async function countDecisionQueue({ db, actor }: ServiceContext): Promise
 
 /**
  * Vendedores no escopo do ator, para filtros e para escolher o destino de
- * transferência, redistribuição ou recuperação. SUPERVISOR: os da equipe que
- * lidera; ADMIN: todos. Quem pode receber um lead é decidido de novo no
+ * transferência, redistribuição ou recuperação. ADMIN e SUPERVISOR: todos.
+ * Quem pode receber um lead é decidido de novo no
  * serviço da operação (vendedor ativo, da equipe permitida).
  */
 export async function listLeadSellers({ db, actor }: ServiceContext): Promise<LeadSellerOption[]> {
   assertPermission(actor, "leads:transfer");
-  if (actor.role === "SUPERVISOR" && !actor.supervisedTeamId) return [];
   return db
     .select({ id: users.id, name: users.name, active: users.active, teamId: users.teamId, teamName: teams.name })
     .from(users)
     .leftJoin(teams, eq(teams.id, users.teamId))
-    .where(and(eq(users.role, "SELLER"), actor.role === "SUPERVISOR" ? eq(users.teamId, actor.supervisedTeamId!) : undefined))
+    .where(eq(users.role, "SELLER"))
     .orderBy(asc(teams.name), asc(users.name));
 }
 
@@ -646,7 +659,7 @@ export type LeadIndicators = {
   /** Carteira ATUAL (leads ativos agora), por etapa — independe do período. */
   portfolio: { stage: LeadStage; count: number }[];
   alerts: {
-    /** Follow-up 1/2/3 com prazo vencido (inclui Follow-up 3 aguardando o supervisor). */
+    /** FUP 1/2/3 com prazo vencido. */
     followUpsOverdue: number;
     negotiationsOverdue: number;
     /** Fila de decisão do supervisor/admin; null para quem não decide (SELLER). */
@@ -741,13 +754,6 @@ async function assertNoOverdueNegotiation(db: Database, actor: Actor, exceptLead
   if (overdue.length > 0) throw new NegotiationOverdueError(overdue.length);
 }
 
-/** Follow-up 3 vencido: o vendedor só consulta; quem decide é o supervisor. */
-function assertSellerMayChange(actor: Actor, lead: QueueFields): void {
-  if (actor.role === "SELLER" && queueReasonOf(lead, new Date()) === "FOLLOW_UP_3_EXPIRED") {
-    throw new ConflictError(AWAITING_SUPERVISOR_MESSAGE);
-  }
-}
-
 /**
  * Bloqueio por negociação vencida do vendedor logado (para o aviso da tela).
  * null para quem não tem carteira.
@@ -790,13 +796,9 @@ export async function createLead(ctx: ServiceContext, input: unknown): Promise<L
   }
   const ownerId = sellerActor ? actor.userId : data.sellerId!;
   await assertNoOverdueNegotiation(db, actor);
-  await assertPhoneLookupAllowed(db, actor);
 
   const duplicate = await findDuplicate(db, data.phone);
-  if (duplicate) {
-    await countPhoneLookup(db, actor);
-    throw new LeadAlreadyExistsError(duplicate);
-  }
+  if (duplicate) throw new LeadAlreadyExistsError(duplicate);
 
   try {
     const id = await runTransaction(db, async (tx) => {
@@ -821,6 +823,8 @@ export async function createLead(ctx: ServiceContext, input: unknown): Promise<L
           name: data.name,
           phone: data.phone,
           interestCourseId: data.interestCourseId,
+          source: data.source,
+          sourceDetail: sourceDetailOf(data.source, data.sourceDetail),
           ownerId,
           teamId,
           createdBy: actor.userId,
@@ -848,17 +852,14 @@ export async function createLead(ctx: ServiceContext, input: unknown): Promise<L
   } catch (error) {
     if (isUniqueViolation(error, "leads_phone_unique")) {
       const existing = await findDuplicate(db, data.phone);
-      if (existing) {
-        await countPhoneLookup(db, actor);
-        throw new LeadAlreadyExistsError(existing);
-      }
+      if (existing) throw new LeadAlreadyExistsError(existing);
     }
     throw error;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Edição (nome, telefone e curso de interesse) — dentro do escopo de cada perfil
+// Edição (nome, telefone, curso de interesse e origem) — dentro do escopo de cada perfil
 // ---------------------------------------------------------------------------
 
 type CourseRef = { id: string; name: string; institutionName: string };
@@ -874,8 +875,11 @@ async function findCourse(db: Database, id: string): Promise<(CourseRef & { acti
 
 const courseRef = ({ id, name, institutionName }: CourseRef): CourseRef => ({ id, name, institutionName });
 
+/** Origem gravada no de/para do DETAILS_UPDATED (null: lead sem origem, anterior à 015). */
+type SourceRef = { source: LeadSource; detail: string | null };
+
 /**
- * Edita nome, telefone e/ou curso de interesse. SELLER: próprios leads;
+ * Edita nome, telefone, curso de interesse e/ou origem. SELLER: próprios leads;
  * SUPERVISOR: leads da equipe; ADMIN: todos. Fora do escopo → NotFound; na
  * Lixeira → recusado (recupere primeiro). Não mexe em responsável, equipe,
  * etapa, prazos nem ciclo. Só grava (e só gera DETAILS_UPDATED, com de/para dos
@@ -893,12 +897,10 @@ export async function editLead(ctx: ServiceContext, rawId: unknown, input: unkno
     await runTransaction(db, async (tx) => {
       const lead = await lockLeadForChange(tx, actor, id);
       if (lead.status === "TRASHED") throw new ValidationError("Lead na Lixeira não pode ser editado. Recupere-o primeiro.");
-      assertSellerMayChange(actor, lead);
 
       const changes: Record<string, { from: unknown; to: unknown }> = {};
       if (data.name !== undefined && data.name !== lead.name) changes.name = { from: lead.name, to: data.name };
       if (data.phone !== undefined && data.phone !== lead.phone) {
-        await assertPhoneLookupAllowed(tx, actor);
         const duplicate = await findDuplicate(tx, data.phone);
         if (duplicate) throw new LeadAlreadyExistsError(duplicate, "edit");
         changes.phone = { from: lead.phone, to: data.phone };
@@ -910,6 +912,12 @@ export async function editLead(ctx: ServiceContext, rawId: unknown, input: unkno
         }
         changes.interestCourse = { from: courseRef(from!), to: courseRef(to) };
       }
+      const sourceDetail = data.source === undefined ? null : sourceDetailOf(data.source, data.sourceDetail);
+      if (data.source !== undefined && (data.source !== lead.source || sourceDetail !== lead.sourceDetail)) {
+        const from: SourceRef | null = lead.source ? { source: lead.source, detail: lead.sourceDetail } : null;
+        const to: SourceRef = { source: data.source, detail: sourceDetail };
+        changes.source = { from, to };
+      }
       if (Object.keys(changes).length === 0) return;
 
       await tx
@@ -918,6 +926,8 @@ export async function editLead(ctx: ServiceContext, rawId: unknown, input: unkno
           name: changes.name ? data.name : undefined,
           phone: changes.phone ? data.phone : undefined,
           interestCourseId: changes.interestCourse ? data.interestCourseId : undefined,
+          source: changes.source ? data.source : undefined,
+          sourceDetail: changes.source ? sourceDetail : undefined,
         })
         .where(eq(leads.id, lead.id));
       const cycle = await latestCycle(tx, lead.id);
@@ -936,14 +946,9 @@ export async function editLead(ctx: ServiceContext, rawId: unknown, input: unkno
       ]);
     });
   } catch (error) {
-    // Fora da transação, que já foi desfeita: a contagem precisa permanecer.
-    if (error instanceof LeadAlreadyExistsError) await countPhoneLookup(db, actor);
     if (data.phone && isUniqueViolation(error, "leads_phone_unique")) {
       const existing = await findDuplicate(db, data.phone);
-      if (existing) {
-        await countPhoneLookup(db, actor);
-        throw new LeadAlreadyExistsError(existing, "edit");
-      }
+      if (existing) throw new LeadAlreadyExistsError(existing, "edit");
     }
     throw error;
   }
@@ -965,7 +970,6 @@ export async function addLeadNote({ db, actor }: ServiceContext, rawId: unknown,
 
   await runTransaction(db, async (tx) => {
     const lead = await lockLeadForChange(tx, actor, id);
-    assertSellerMayChange(actor, lead);
     const cycle = await currentCycle(tx, lead.id);
     const [note] = await tx
       .insert(leadNotes)
@@ -1001,10 +1005,10 @@ export async function addLeadNote({ db, actor }: ServiceContext, rawId: unknown,
 
 /**
  * Move o lead para outra etapa, validando no backend, nesta ordem: permissão
- * e escopo (lead próprio e ativo), negociação vencida em OUTRO lead, transição
- * permitida (STAGE_TRANSITIONS) e Follow-up 3 vencido. Define a entrada na
- * etapa e o prazo (horas corridas de BUSINESS_RULES nas etapas com prazo; nenhum nas demais) e
- * grava STAGE_CHANGED, tudo na mesma transação.
+ * e escopo (lead próprio e ativo), negociação vencida em OUTRO lead e transição
+ * permitida (STAGE_TRANSITIONS: livre entre as etapas do funil, C59). Define a
+ * entrada na etapa e o prazo (horas corridas de BUSINESS_RULES: FUP 1/2/3 e
+ * Negociação; nenhum nas demais) e grava STAGE_CHANGED, tudo na mesma transação.
  */
 export async function moveLeadStage({ db, actor }: ServiceContext, rawId: unknown, input: unknown): Promise<LeadView> {
   assertPermission(actor, "leads:move");
@@ -1018,23 +1022,22 @@ export async function moveLeadStage({ db, actor }: ServiceContext, rawId: unknow
 
     if (toStage === lead.stage) throw new ValidationError(`O lead já está em ${STAGE_LABELS[toStage]}.`);
     if (toStage === "CLOSED") {
-      throw new ValidationError("Fechamento só acontece ao registrar uma venda.");
+      throw new ValidationError("Vendido só acontece ao registrar uma venda.");
     }
     if (toStage === "REWORK") {
-      throw new ValidationError("Retrabalho só acontece por redistribuição ou recuperação da Lixeira, feitas pelo supervisor.");
+      throw new ValidationError("Em contato (nova tentativa) só acontece por redistribuição ou recuperação de Perdido, feitas pelo supervisor.");
     }
     if (!canTransition(lead.stage, toStage)) {
       throw new ValidationError(`Movimentação não permitida: de ${STAGE_LABELS[lead.stage]} para ${STAGE_LABELS[toStage]}.`);
     }
-    assertSellerMayChange(actor, lead);
 
-    const hours = toStage === "NEGOTIATION" ? BUSINESS_RULES.negotiationDeadlineHours : BUSINESS_RULES.followUpDeadlineHours;
+    const hours = stageDeadlineHours(toStage);
     await tx
       .update(leads)
       .set({
         stage: toStage,
         stageEnteredAt: sql`now()`,
-        stageDueAt: STAGES_WITH_DEADLINE.includes(toStage) ? sql`now() + make_interval(hours => ${hours})` : null,
+        stageDueAt: hours === null ? null : sql`now() + make_interval(hours => ${hours})`,
       })
       .where(eq(leads.id, lead.id));
 
@@ -1073,7 +1076,7 @@ export async function transferLead({ db, actor }: ServiceContext, rawId: unknown
   await runTransaction(db, async (tx) => {
     const lead = await lockLeadForChange(tx, actor, id, [toSellerId]);
     if (lead.status !== "ACTIVE") throw new ValidationError("Lead na Lixeira não pode ser transferido. Recupere-o primeiro.");
-    if (lead.stage === "CLOSED") throw new ValidationError("Lead em Fechamento não pode ser transferido.");
+    if (lead.stage === "CLOSED") throw new ValidationError("Lead Vendido não pode ser transferido.");
     const seller = await loadTargetSeller(tx, actor, toSellerId);
     if (seller.id === lead.ownerId) throw new ValidationError("O lead já está com este vendedor.");
 
@@ -1105,13 +1108,14 @@ export async function transferLead({ db, actor }: ServiceContext, rawId: unknown
 }
 
 // ---------------------------------------------------------------------------
-// Redistribuição / Retrabalho e Lixeira (SUPERVISOR na própria equipe; ADMIN)
+// Redistribuição e Lixeira / Perdido (SUPERVISOR na própria equipe; ADMIN)
 // ---------------------------------------------------------------------------
 
 /**
- * Nova tentativa comercial após Follow-up 3 vencido: encerra o ciclo atual
+ * Nova tentativa comercial após FUP 3 vencido: encerra o ciclo atual
  * (REDISTRIBUTED), abre o ciclo seguinte (REWORK) para o vendedor escolhido e
- * coloca o lead em Retrabalho, sem prazo.
+ * coloca o lead em REWORK ("Em contato (nova tentativa)", na coluna Em
+ * contato do Kanban), sem prazo (C59). O banco exige REWORK nesses eventos.
  */
 export async function redistributeLead({ db, actor }: ServiceContext, rawId: unknown, input: unknown): Promise<void> {
   assertPermission(actor, "leads:redistribute");
@@ -1120,9 +1124,7 @@ export async function redistributeLead({ db, actor }: ServiceContext, rawId: unk
 
   await runTransaction(db, async (tx) => {
     const lead = await lockLeadForChange(tx, actor, id, [toSellerId]);
-    const followUp3Expired =
-      lead.status === "ACTIVE" && lead.stage === "FOLLOW_UP_3" && lead.stageDueAt !== null && lead.stageDueAt < new Date();
-    if (!followUp3Expired) throw new ValidationError("Só é possível redistribuir leads com Follow-up 3 vencido.");
+    if (!isFollowUp3Expired(lead, new Date())) throw new ValidationError("Só é possível redistribuir leads com FUP 3 vencido.");
     const seller = await loadTargetSeller(tx, actor, toSellerId);
 
     const cycle = await currentCycle(tx, lead.id);
@@ -1142,7 +1144,7 @@ export async function trashLead({ db, actor }: ServiceContext, rawId: unknown): 
   await runTransaction(db, async (tx) => {
     const lead = await lockLeadForChange(tx, actor, id);
     if (lead.status === "TRASHED") throw new ValidationError("O lead já está na Lixeira.");
-    if (lead.stage === "CLOSED") throw new ValidationError("Lead em Fechamento não pode ir para a Lixeira.");
+    if (lead.stage === "CLOSED") throw new ValidationError("Lead Vendido não pode ir para Perdido (Lixeira).");
 
     const cycle = await currentCycle(tx, lead.id);
     await tx
@@ -1168,7 +1170,7 @@ export async function trashLead({ db, actor }: ServiceContext, rawId: unknown): 
   });
 }
 
-/** Recupera da Lixeira: novo ciclo REWORK para o vendedor escolhido, etapa Retrabalho. */
+/** Recupera da Lixeira (Perdido): novo ciclo REWORK para o vendedor escolhido, etapa REWORK ("Em contato (nova tentativa)", C59). */
 export async function restoreLead({ db, actor }: ServiceContext, rawId: unknown, input: unknown): Promise<void> {
   assertPermission(actor, "leads:restore");
   const id = parseInput(idSchema, rawId);
